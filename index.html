@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مصطفى الازهرى - نظام المنتجات والفواتير</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            font-family: 'Cairo', sans-serif; 
+        }
+        .modal { 
+            animation: fadeIn 0.3s ease; 
+        }
+        @keyframes fadeIn { 
+            from { opacity: 0; transform: scale(0.95); } 
+            to { opacity: 1; transform: scale(1); } 
+        }
+        @media print {
+            .no-print { display: none !important; }
+            header, nav, #product-modal, #saved-invoices-section { display: none !important; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #000 !important; padding: 8px !important; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+<div class="max-w-5xl mx-auto min-h-screen flex flex-col p-4">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm sticky top-0 z-50">
+        <div class="px-6 py-4 flex items-center justify-between">
+            <h1 id="go-top" class="text-2xl font-bold text-blue-700 cursor-pointer">مصطفى الازهرى للادوات الصحية</h1>
+            
+        </div>
+    </header>
+
+    <!-- Navigation -->
+    <nav class="bg-white border-b shadow-sm">
+        <div class="flex">
+            <button onclick="showSection('products')" 
+                    id="btn-products" 
+                    class="flex-1 py-4 text-center font-semibold border-b-4 border-blue-600 text-blue-600">
+                🛍️ منتجاتنا
+            </button>
+            <button onclick="showSection('invoice')" 
+                    id="btn-invoice" 
+                    class="flex-1 py-4 text-center font-semibold border-b-4 border-transparent">
+                📝 فاتورة جديدة
+            </button>
+        </div>
+    </nav>
+
+    <!-- Products Section -->
+    <div id="products-section" class="flex-1 p-4 overflow-auto">
+        <!-- الصف الأول: الأزرار -->
+         <div class="flex gap-4 mb-4">
+    
+    <button onclick="openAddProductModal()" 
+            class="flex-1 bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 transition font-semibold shadow">
+        + إضافة منتج
+    </button>
+    
+    <button onclick="openBulkPriceModal()"
+            class="flex-1 bg-amber-600 text-white py-3 rounded-xl hover:bg-amber-700 transition font-semibold shadow">
+        ✏️ تعديل الأسعار
+    </button>
+
+</div>
+
+<!-- الصف الثاني: العنوان + السيرش -->
+<div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
+    
+    <h2 class="text-2xl font-bold">قائمة المنتجات</h2>
+    
+    <input id="product-search-box"
+           type="text"
+           placeholder="🔍 ابحث عن منتج..."
+           class="w-full md:w-80 px-4 py-3 rounded-xl border focus:border-blue-500 outline-none">
+</div>
+
+
+    <div id="products-list" class="space-y-6"></div>
+    </div>
+
+    <!-- Invoice Section -->
+    <div id="invoice-section" class="flex-1 p-4 overflow-auto hidden">
+
+        <!-- بيانات الفاتورة -->
+        <div class="bg-white rounded-2xl shadow p-6 mb-6">
+            <div class="mb-6">
+                <label class="block text-sm font-semibold mb-2">اسم التاجر</label>
+                <input 
+    type="text" 
+    id="customer-name" 
+    list="customers-datalist"
+    placeholder="اسم التاجر"
+    class="w-full px-4 py-3 rounded-xl border focus:border-blue-500 outline-none" 
+    oninput="updateInvoiceHeader()">
+<datalist id="customers-datalist"></datalist>
+            </div>
+
+            <!-- اختيار المنتج -->
+            <!-- اختيار المنتج + المقاس + الكمية في صف واحد -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6">
+    
+    <!-- المنتج (يدعم الكتابة + البحث) -->
+    <div class="md:col-span-5">
+        <label class="block text-sm font-semibold mb-2">اختر المنتج</label>
+        <input 
+            type="text" 
+            id="product-search" 
+            list="products-datalist"
+            placeholder="اكتب اسم المنتج..."
+            class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:border-blue-500 outline-none"
+            oninput="handleProductSearch(this.value)">
+        <datalist id="products-datalist"></datalist>
+    </div>
+
+    <!-- المقاس -->
+    <div class="md:col-span-3">
+        <label class="block text-sm font-semibold mb-2">المقاس</label>
+        <select id="size-select" 
+                onchange="updatePriceDisplay()"
+                class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:border-blue-500 outline-none">
+        </select>
+    </div>
+
+    <!-- الكمية + زرار أضف -->
+    <div class="md:col-span-4">
+        <label class="block text-sm font-semibold mb-2">الكمية</label>
+        <div class="flex gap-2">
+            <input id="qty-input" 
+                   type="number" 
+                   min="1" 
+                   value="1" 
+                   class="w-full px-4 py-3 border border-gray-300 rounded-xl text-center focus:border-blue-500 outline-none">
+            <button onclick="addToInvoice()" 
+                    class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl transition font-medium">
+                أضف
+            </button>
+        </div>
+    </div>
+</div>
+
+        <!-- جدول الفاتورة الحالية -->
+        <div class="bg-white rounded-2xl shadow overflow-hidden mb-6">
+            <div class="px-6 py-4 bg-gray-100 flex justify-between items-center">
+                <h3 class="font-bold">تفاصيل الفاتورة الحالية</h3>
+                <button onclick="clearInvoice()" class="text-red-500 hover:text-red-600 transition">مسح الكل</button>
+            </div>
+            
+            <div class="p-6 border-b">
+                <div class="flex justify-between text-sm">
+                    <div>التاجر: <span id="invoice-customer" class="font-bold"></span></div>
+                    <div>التاريخ: <span id="invoice-date"></span></div>
+                </div>
+            </div>
+
+            <table class="w-full">
+                <thead class="bg-gray-100">
+                    <tr>
+                        <th class="py-3 px-4 text-right">المنتج</th>
+                        <th class="py-3 px-4">المقاس</th>
+                        <th class="py-3 px-4">السعر</th>
+                        <th class="py-3 px-4">الكمية</th>
+                        <th class="py-3 px-4">الإجمالي</th>
+                        <th class="py-3 px-4 no-print">حذف</th>
+                    </tr>
+                </thead>
+                <tbody id="invoice-tbody"></tbody>
+            </table>
+
+            <div class="p-6 bg-blue-50 text-xl font-bold flex justify-between">
+                <span>الإجمالي الكلي</span>
+                <span id="total-display">0 جنيه</span>
+            </div>
+        </div>
+        <!-- === المبالغ النهائية تحت الجدول === -->
+<div class="bg-white rounded-2xl shadow p-6 mt-6">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        <!-- المبلغ المدفوع -->
+        <div>
+            <label class="block text-sm font-semibold mb-2 text-gray-700">المبلغ المدفوع</label>
+            <div class="relative">
+                <input id="paid-input" 
+                       type="number" 
+                       min="0" 
+                       value="0"
+                       class="w-full px-5 py-4 text-2xl font-bold rounded-2xl border focus:border-green-500 outline-none text-center">
+                <span class="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 font-medium">جنيه</span>
+            </div>
+        </div>
+
+        <!-- الإجمالي -->
+        <div>
+            <label class="block text-sm font-semibold mb-2 text-gray-700">الإجمالي</label>
+            <input id="total-input" 
+                   type="text" 
+                   readonly
+                   class="w-full px-5 py-4 text-2xl font-bold rounded-2xl border bg-blue-50 text-blue-700 text-center">
+        </div>
+
+        <!-- المتبقي -->
+        <div>
+            <label class="block text-sm font-semibold mb-2 text-gray-700">المتبقي</label>
+            <input id="remaining-input" 
+                   type="text" 
+                   readonly
+                   class="w-full px-5 py-4 text-2xl font-bold rounded-2xl border bg-red-50 text-red-600 text-center">
+        </div>
+    </div>
+</div>
+
+        <button onclick="saveCurrentInvoice()" 
+        class="w-full bg-purple-600 hover:bg-purple-700 text-white py-4 rounded-2xl text-xl font-bold mb-8 transition">
+    حفظ الفاتورة كاملة
+</button>
+
+        <!-- بحث الفواتير السابقة -->
+        <div class="mb-4">
+            <input id="search-customer" 
+                   type="text" 
+                   placeholder="اكتب اسم التاجر للبحث..." 
+                   class="w-full px-4 py-3 rounded-xl border focus:border-blue-500 outline-none"
+                   oninput="filterInvoicesByCustomer()">
+        </div>
+
+        <!-- قسم الفواتير السابقة -->
+        <div class="bg-white rounded-2xl shadow p-6">
+            <h3 class="font-bold text-lg mb-4">📋 فواتيري السابقة</h3>
+            <div id="saved-invoices-list" class="space-y-4"></div>
+        </div>
+        
+    </div>
+</div>
+
+<!-- مودال إضافة/تعديل منتج -->
+<div id="product-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+    <div class="bg-white rounded-2xl w-full max-w-lg mx-4 overflow-hidden">
+        <div class="p-6 bg-gray-100 flex justify-between items-center">
+            <h3 id="modal-title" class="text-xl font-bold">إضافة منتج جديد</h3>
+            <button onclick="closeModal()" class="text-3xl leading-none hover:text-gray-700">×</button>
+        </div>
+        <div class="p-6">
+            <div class="mb-6">
+                <label class="block mb-2 font-medium">اسم المنتج</label>
+                <input id="product-name" 
+                       type="text" 
+                       class="w-full px-4 py-3 border rounded-xl focus:border-blue-500 outline-none">
+            </div>
+            <!-- تصنيف الشركة - الجزء الجديد -->
+<div class="mb-6">
+    <label class="block mb-3 font-medium text-gray-700">تصنيف المنتج (الشركة)</label>
+    <div class="flex flex-col sm:flex-row gap-4">
+
+        <!-- شركة البحر الأحمر -->
+        <label class="flex items-center gap-3 cursor-pointer group">
+            <div class="relative">
+                <input type="checkbox" id="company-redsea" 
+                       class="peer w-6 h-6 accent-blue-600 border-2 border-gray-300 rounded-lg 
+                              focus:ring-2 focus:ring-blue-500 cursor-pointer
+                              appearance-none checked:bg-blue-600 checked:border-blue-600">
+                <span class="absolute inset-0 flex items-center justify-center text-white text-xl font-bold 
+                             opacity-0 peer-checked:opacity-100 pointer-events-none">✓</span>
+            </div>
+            <span class="text-base font-medium text-gray-700 group-hover:text-blue-700">شركة البحر الأحمر</span>
+        </label>
+
+        <!-- شركة أكوا دلتا -->
+        <label class="flex items-center gap-3 cursor-pointer group">
+            <div class="relative">
+                <input type="checkbox" id="company-aquadelta" 
+                       class="peer w-6 h-6 accent-blue-600 border-2 border-gray-300 rounded-lg 
+                              focus:ring-2 focus:ring-blue-500 cursor-pointer
+                              appearance-none checked:bg-blue-600 checked:border-blue-600">
+                <span class="absolute inset-0 flex items-center justify-center text-white text-xl font-bold 
+                             opacity-0 peer-checked:opacity-100 pointer-events-none">✓</span>
+            </div>
+            <span class="text-base font-medium text-gray-700 group-hover:text-blue-600">شركة أكوا دلتا</span>
+        </label>
+
+    </div>
+</div>
+            <div>
+                <div class="flex justify-between items-center mb-3">
+                    <label class="font-medium">المقاسات والأسعار</label>
+                    <button onclick="addVariantRow()" 
+                            class="bg-blue-100 hover:bg-blue-200 px-4 py-2 rounded-xl text-sm transition">
+                        + مقاس جديد
+                    </button>
+                </div>
+                <div id="variants-container" class="space-y-3 max-h-60 overflow-auto"></div>
+            </div>
+        </div>
+        <div class="p-6 bg-gray-100 flex gap-4">
+            <button onclick="closeModal()" 
+                    class="flex-1 py-3 border rounded-xl hover:bg-gray-50 transition">
+                إلغاء
+            </button>
+            <button onclick="saveProduct()" 
+                    class="flex-1 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition">
+                حفظ المنتج
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- مودال تعديل الأسعار جماعي (النسخة البسيطة) -->
+<div id="bulk-price-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+    <div class="bg-white rounded-3xl w-full max-w-md mx-4 overflow-hidden">
+
+        <!-- العنوان -->
+        <div class="p-6 bg-gradient-to-r from-amber-500 to-orange-600 text-white text-center">
+            <h3 class="text-xl font-bold">تعديل الأسعار لشركة</h3>
+        </div>
+
+        <div class="p-6 space-y-6">
+
+            <!-- اختيار الشركة -->
+            <div>
+                <label class="block text-sm font-semibold mb-3 text-gray-700">اختر الشركة</label>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="selectCompanyForBulk('redsea')" 
+                            id="btn-redsea"
+                            class="py-5 rounded-2xl border-2 border-gray-300 font-medium text-lg hover:border-amber-500 transition-all">
+                        🌊 البحر الأحمر
+                    </button>
+                    <button onclick="selectCompanyForBulk('aquadelta')" 
+                            id="btn-aquadelta"
+                            class="py-5 rounded-2xl border-2 border-gray-300 font-medium text-lg hover:border-amber-500 transition-all">
+                        💧 أكوا دلتا
+                    </button>
+                </div>
+            </div>
+
+            <!-- نوع التعديل -->
+            <!-- نوع التعديل -->
+<div>
+    <label class="block text-sm font-semibold mb-3 text-gray-700">نوع التعديل</label>
+    <div class="grid grid-cols-3 gap-3">
+        <button onclick="setBulkEditType('percent')" 
+                id="btn-percent"
+                class="py-4 rounded-2xl border-2 border-gray-300 font-medium transition-all active:bg-amber-100">
+            زيادة نسبة (%)
+        </button>
+        <button onclick="setBulkEditType('minus_percent')" 
+                id="btn-minus-percent"
+                class="py-4 rounded-2xl border-2 border-gray-300 font-medium transition-all active:bg-amber-100">
+            نقصان نسبة (%)
+        </button>
+        <button onclick="setBulkEditType('fixed')" 
+                id="btn-fixed"
+                class="py-4 rounded-2xl border-2 border-gray-300 font-medium transition-all active:bg-amber-100">
+            زيادة ثابتة (جنيه)
+        </button>
+        <button onclick="setBulkEditType('minus_fixed')" 
+                id="btn-minus-fixed"
+                class="py-4 rounded-2xl border-2 border-gray-300 font-medium transition-all active:bg-amber-100 col-span-3">
+            نقصان ثابت (جنيه)
+        </button>
+    </div>
+</div>
+
+            <!-- حقل الإدخال -->
+            <div>
+                <label class="block text-sm font-semibold mb-2 text-gray-700" id="bulk-label">نسبة الزيادة (%)</label>
+                <input id="bulk-value" 
+                       type="number" 
+                       step="0.01" 
+                       min="0"
+                       class="w-full px-6 py-5 text-3xl font-bold text-center border-2 border-gray-300 rounded-2xl focus:border-amber-500 outline-none"
+                       placeholder="0">
+            </div>
+
+        </div>
+
+        <!-- أزرار أسفل المودال -->
+        <div class="p-6 bg-gray-50 border-t flex gap-3">
+            <button onclick="closeBulkPriceModal()" 
+                    class="flex-1 py-4 text-lg border border-gray-300 rounded-2xl font-medium hover:bg-gray-100">
+                إلغاء
+            </button>
+            <button onclick="applyBulkPriceChange()" 
+                    class="flex-1 py-4 text-lg bg-green-600 hover:bg-green-700 text-white rounded-2xl font-medium">
+                تطبيق التعديل
+            </button>
+        </div>
+
+    </div>
+</div>
+
+<!-- Firebase SDK - Compat Version (الأسهل مع كودك الحالي) -->
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+
+<script>
+// ==================== Firebase Configuration ====================
+const firebaseConfig = {
+    apiKey: "AIzaSyBZxiuwzS2oEtTriBmUWo447VM8OAXnzss",
+    authDomain: "mustafaelazhary-5938a.firebaseapp.com",
+    projectId: "mustafaelazhary-5938a",
+    storageBucket: "mustafaelazhary-5938a.firebasestorage.app",
+    messagingSenderId: "986202492788",
+    appId: "1:986202492788:web:6c83a7b7c6940e0562e621"
+};
+
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// جعل db متاح في كل الدوال
+window.db = db;
+
+console.log("✅ Firebase Firestore تم تهيئته بنجاح");
+</script>
+
+
+<script src="script.js"></script>
+
+
+</body>
+</html>
