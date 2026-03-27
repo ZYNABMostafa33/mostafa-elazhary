@@ -11,7 +11,13 @@ let bulkEditCompany = null;     // الشركة اللي هنعدل أسعاره
 let bulkEditType = 'percent';   // 'percent' أو 'fixed'
 let allCustomers = [];   // عشان نحفظ أسماء الزبائن السابقين
 
-
+// ==================== Retail (قطاعي) - متغيرات جديدة ====================
+let retailInvoice = [];
+let savedRetailInvoices = [];
+let editingRetailInvoiceIndex = null;     // ← مهم جدًا
+let allRetailCustomers = [];              // للاقتراحات
+let retailPriceAdjustment = 0;   // قيمة الزيادة أو النقصان
+let retailAdjustmentType = 'percent';
 
 async function saveProducts() {
     try {
@@ -428,7 +434,9 @@ function saveCurrentInvoice() {
         items: JSON.parse(JSON.stringify(currentInvoice)),
         total: Number(currentTotal.toFixed(2)),
         paid: parseFloat(document.getElementById("paid-input").value) || 0,
-        date: Date.now()
+        date: (editingInvoiceIndex !== null && savedInvoices[editingInvoiceIndex])
+        ? savedInvoices[editingInvoiceIndex].date
+        : Date.now()
     };
 
     if (editingInvoiceIndex !== null) {
@@ -511,6 +519,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (paidInput) {
         paidInput.addEventListener('input', updateTotalAndRemaining);
     }
+    const retailPaid = document.getElementById('retail-paid-input');
+if (retailPaid) retailPaid.addEventListener('input', updateRetailTotalAndRemaining);
 });
 
 // ==================== إعادة حساب كل فواتير الزبون بعد أي تعديل ====================
@@ -998,27 +1008,45 @@ function printSavedInvoice(index) {
 
 
 // ==================== تبديل الأقسام ====================
+// ==================== تبديل الأقسام (النسخة الكاملة والمُصححة) ====================
 function showSection(section) {
+    // جلب العناصر
     const productsSection = document.getElementById('products-section');
-    const invoiceSection = document.getElementById('invoice-section');
+    const invoiceSection   = document.getElementById('invoice-section');
+    const retailSection    = document.getElementById('retail-section');
+
     const btnProducts = document.getElementById('btn-products');
-    const btnInvoice = document.getElementById('btn-invoice');
+    const btnInvoice  = document.getElementById('btn-invoice');
+    const btnRetail   = document.getElementById('btn-retail');
 
-    if (!productsSection || !invoiceSection || !btnProducts || !btnInvoice) return;
+    // إخفاء كل الأقسام
+    if (productsSection) productsSection.classList.add('hidden');
+    if (invoiceSection)  invoiceSection.classList.add('hidden');
+    if (retailSection)   retailSection.classList.add('hidden');
 
-    productsSection.classList.add('hidden');
-    invoiceSection.classList.add('hidden');
-    btnProducts.classList.remove('border-b-4', 'border-blue-600', 'text-blue-600');
-    btnInvoice.classList.remove('border-b-4', 'border-blue-600', 'text-blue-600');
+    // إزالة التنسيق النشط من كل الأزرار
+    if (btnProducts) btnProducts.classList.remove('border-b-4', 'border-blue-600', 'text-blue-600');
+    if (btnInvoice)  btnInvoice.classList.remove('border-b-4', 'border-blue-600', 'text-blue-600');
+    if (btnRetail)   btnRetail.classList.remove('border-b-4', 'border-green-600', 'text-green-600');
 
+    // عرض القسم المطلوب وتفعيل الزر
     if (section === 'products') {
-        productsSection.classList.remove('hidden');
-        btnProducts.classList.add('border-b-4', 'border-blue-600', 'text-blue-600');
-    } else {
-        invoiceSection.classList.remove('hidden');
-        btnInvoice.classList.add('border-b-4', 'border-blue-600', 'text-blue-600');
+        if (productsSection) productsSection.classList.remove('hidden');
+        if (btnProducts) btnProducts.classList.add('border-b-4', 'border-blue-600', 'text-blue-600');
+
+    } else if (section === 'invoice') {
+        if (invoiceSection) invoiceSection.classList.remove('hidden');
+        if (btnInvoice) btnInvoice.classList.add('border-b-4', 'border-blue-600', 'text-blue-600');
         populateProductDatalist();
         updateInvoiceHeader();
+
+    } else if (section === 'retail') {
+        if (retailSection) retailSection.classList.remove('hidden');
+        if (btnRetail) btnRetail.classList.add('border-b-4', 'border-green-600', 'text-green-600');
+
+        // مهم: تحديث الاقتراحات والمنتجات
+        populateProductDatalist();           // للبحث عن المنتجات
+        updateRetailInvoiceHeader();         // عرض اسم العميل + الدين السابق
     }
 }
 
@@ -1067,6 +1095,14 @@ function listenToDataChanges() {
                 renderSavedInvoices();
             }
         });
+
+        db.collection("appData").doc("retail_invoices")
+        .onSnapshot((doc) => {
+            if (doc.exists) {
+                savedRetailInvoices = doc.data().savedRetailInvoices || [];
+                renderRetailInvoices();
+            }
+        });
 }
 
 async function loadSavedInvoices() {
@@ -1088,15 +1124,19 @@ async function loadSavedInvoices() {
 async function startApp() {
     await loadProducts();
     await loadSavedInvoices();
+    
+    // أضف تحميل فواتير القطاعي هنا أيضًا
+    await loadRetailInvoices();        // ← أضف هذا السطر
 
     renderProducts();
     populateProductDatalist();
     renderSavedInvoices();
+    renderRetailInvoices();            // ← أضف هذا أيضًا
+
     setupCustomerAutocomplete();
+    setupRetailCustomerAutocomplete();
 
-    // تفعيل التحديث التلقائي
     listenToDataChanges();
-
     showSection('products');
 
     console.log("🚀 التطبيق بدأ بنجاح مع Firebase");
@@ -1279,6 +1319,746 @@ function populateSizeSelect() {
 document.getElementById('product-search').addEventListener('input', () => {
     populateSizeSelect();
     updatePriceDisplay();
+});
+
+
+// ==================== Retail - دوال المنتجات ====================
+function handleRetailProductSearch(val) {
+    const sizeSelect = document.getElementById('retail-size-select');
+    if (!sizeSelect) return;
+    sizeSelect.innerHTML = '<option value="">اختر المقاس...</option>';
+
+    const product = products.find(p => p.name === val);
+    if (!product || !Array.isArray(product.variants)) return;
+
+    product.variants.forEach(variant => {
+        const opt = document.createElement('option');
+        opt.value = variant.size;
+        opt.textContent = variant.size;
+        sizeSelect.appendChild(opt);
+    });
+}
+
+
+
+// ==================== عرض جدول الفاتورة القطاعية ====================
+function renderRetailTable() {
+    const tbody = document.getElementById('retail-invoice-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    retailInvoice.forEach((item, index) => {
+        const row = document.createElement('tr');
+        row.className = 'hover:bg-gray-50';
+        row.innerHTML = `
+            <td class="py-5 px-6 font-medium">${item.productName}</td>
+            <td class="py-5 px-6 text-center text-lg">${item.size}</td>
+            <td class="py-5 px-6 text-center">${item.price}</td>
+            <td class="py-5 px-6 text-center text-lg font-medium">${item.qty}</td>
+            <td class="py-5 px-6 text-center font-bold">${item.subtotal.toFixed(2)}</td>
+            <td class="py-5 px-6 text-center no-print">
+                <button onclick="removeRetailItem(${index})" class="text-red-500 hover:text-red-700 text-3xl">🗑️</button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+// ==================== حذف منتج من الفاتورة القطاعية ====================
+window.removeRetailItem = function(index) {
+    retailInvoice.splice(index, 1);
+    renderRetailTable();
+    updateRetailTotalAndRemaining();
+};
+
+// ==================== حساب الدين السابق لعميل قطاعي ====================
+function getRetailCustomerPreviousDebt(customerName, excludeIndex = -1) {
+    if (!customerName || customerName === 'عميل غير محدد') return 0;
+
+    const customerInvs = savedRetailInvoices
+        .map((inv, idx) => ({ ...inv, originalIndex: idx }))
+        .filter(inv => inv.customer === customerName && inv.originalIndex !== excludeIndex)
+        .sort((a, b) => a.date - b.date);
+
+    let runningDebt = 0;
+    for (let inv of customerInvs) {
+        const total = Number(inv.total) || 0;
+        const paid = Number(inv.paid) || 0;
+        runningDebt = Math.max(0, (total + runningDebt) - paid);
+    }
+    return runningDebt;
+}
+
+// ==================== بحث فواتير القطاعي السابقة ====================
+function filterRetailInvoicesByCustomer() {
+    const input = document.getElementById('search-retail-customer');
+    const container = document.getElementById('saved-retail-invoices-list');
+    if (!container || !input) return;
+
+    const filter = input.value.trim().toLowerCase();
+
+    if (filter === '') {
+        renderRetailInvoices();
+        return;
+    }
+
+    container.innerHTML = '';
+
+    const filteredInvoices = savedRetailInvoices.filter(inv => 
+        inv.customer && inv.customer.toLowerCase().includes(filter)
+    );
+
+    if (filteredInvoices.length === 0) {
+        container.innerHTML = `
+            <div class="bg-white rounded-2xl p-10 text-center text-gray-500">
+                <p>لا توجد فواتير قطاعي مطابقة للبحث</p>
+            </div>
+        `;
+        return;
+    }
+
+    filteredInvoices.forEach((inv) => {
+        const realIndex = savedRetailInvoices.findIndex(i => i === inv);
+        if (realIndex === -1) return;
+
+        const dateObj = new Date(inv.date);
+        const formattedDate = dateObj.toLocaleDateString('ar-EG', { 
+            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
+        });
+        const formattedTime = dateObj.toLocaleTimeString('ar-EG', { 
+            hour: '2-digit', minute: '2-digit' 
+        });
+
+        const currentTotal = Number(inv.total) || 0;
+        const previousDebt = getRetailCustomerPreviousDebt(inv.customer, realIndex);
+        const paid = Number(inv.paid) || 0;
+        const remaining = (currentTotal + previousDebt) - paid;
+
+        const card = document.createElement('div');
+        card.className = 'bg-gray-50 rounded-xl p-4 shadow-sm';
+
+        card.innerHTML = `
+            <div class="flex justify-between items-center mb-3">
+                <div class="font-semibold">${inv.customer}</div>
+                <div class="text-gray-500 text-sm">${formattedDate} - ${formattedTime}</div>
+            </div>
+            <button onclick="toggleRetailInvoiceDetails(${realIndex})" class="text-green-600 underline mb-3">
+                عرض المنتجات
+            </button>
+            <div id="retail-invoice-details-${realIndex}" class="hidden">
+                <table class="w-full text-right border-collapse mb-4">
+                    <thead class="bg-gray-200">
+                        <tr>
+                            <th class="py-2 px-4 text-right">المنتج</th>
+                            <th class="py-2 px-4">المقاس</th>
+                            <th class="py-2 px-4">السعر</th>
+                            <th class="py-2 px-4">الكمية</th>
+                            <th class="py-2 px-4">الإجمالي</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${inv.items.map(item => `
+                            <tr class="border-b">
+                                <td class="py-2 px-4 text-right">${item.productName}</td>
+                                <td class="py-2 px-4 text-center">${item.size}</td>
+                                <td class="py-2 px-4 text-center">${item.price}</td>
+                                <td class="py-2 px-4 text-center">${item.qty}</td>
+                                <td class="py-2 px-4 text-center font-bold">${item.subtotal}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
+                        <div>
+                            <div class="text-xs text-gray-500 mb-1">إجمالي الفاتورة الجديدة</div>
+                            <div class="text-2xl font-bold text-blue-600">${currentTotal.toFixed(2)} جنيه</div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 mb-1">المبلغ المدفوع</div>
+                            <div class="text-2xl font-bold text-green-600">${paid.toFixed(2)} جنيه</div>
+                        </div>
+                        <div class="md:col-span-3 mt-4 pt-4 border-t">
+                            <div class="text-xs text-gray-500 mb-1">المتبقي النهائي</div>
+                            <div class="text-3xl font-bold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}">
+                                ${remaining.toFixed(2)} جنيه
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-4 mt-4">
+                    <button onclick="printRetailSavedInvoice(${realIndex})" class="text-green-600 underline">طباعة</button>
+                    <button onclick="editRetailSavedInvoice(${realIndex})" class="text-amber-600 underline">تعديل</button>
+                    <button onclick="deleteRetailSavedInvoice(${realIndex})" class="text-red-600 underline">حذف</button>
+                </div>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+}
+
+// ==================== تحديث الإجمالي + الدين + المتبقي للقطاعي ====================
+function updateRetailTotalAndRemaining() {
+    const currentTotal = retailInvoice.reduce((sum, item) => sum + (item.subtotal || 0), 0);
+    const paid = parseFloat(document.getElementById("retail-paid-input")?.value || 0) || 0;
+    const customerName = document.getElementById('retail-customer-name').value.trim();
+
+    // تصحيح اسم الدالة (مهم جداً)
+    const previousDebt = getRetailCustomerPreviousDebt(customerName, editingRetailInvoiceIndex);
+    
+    const grandTotal = currentTotal + previousDebt;
+    let remaining = grandTotal - paid;
+
+    // عرض القيم
+    const totalDisplay = document.getElementById('retail-total-display');
+    const totalInput = document.getElementById('retail-total-input');
+    const remainingEl = document.getElementById('retail-remaining-input');
+
+    if (totalDisplay) totalDisplay.textContent = currentTotal.toFixed(2);
+    if (totalInput) totalInput.value = grandTotal.toFixed(2);
+
+    if (remainingEl) {
+        remainingEl.value = Math.max(0, remaining).toFixed(2);
+        remainingEl.style.color = remaining > 0 ? "#dc2626" : "#16a34a";
+    }
+
+    return { currentTotal, grandTotal, paid, remaining: Math.max(0, remaining), previousDebt };
+}
+
+function saveRetailInvoice() {
+    const customerInput = document.getElementById('retail-customer-name');
+    const customer = customerInput ? customerInput.value.trim() : 'عميل غير محدد';
+
+    if (retailInvoice.length === 0) {
+        return alert('❌ الفاتورة فاضية!');
+    }
+
+    const { currentTotal } = updateRetailTotalAndRemaining();
+
+    const invoice = {
+        customer: customer || 'عميل غير محدد',
+        items: JSON.parse(JSON.stringify(retailInvoice)),
+        total: Number(currentTotal.toFixed(2)),
+        paid: parseFloat(document.getElementById("retail-paid-input").value) || 0,
+        date: Date.now()
+    };
+
+    if (editingRetailInvoiceIndex !== null) {
+        savedRetailInvoices[editingRetailInvoiceIndex] = invoice;
+    } else {
+        savedRetailInvoices.push(invoice);
+    }
+
+    recalculateAllRetailInvoicesForCustomer(customer);
+    saveAllRetailInvoices();
+
+    // تصفير الفاتورة
+    retailInvoice = [];
+    editingRetailInvoiceIndex = null;
+
+    renderRetailTable();
+    updateRetailTotalAndRemaining();
+
+    if (customerInput) customerInput.value = '';
+    document.getElementById('retail-paid-input').value = '0';
+    const remEl = document.getElementById('retail-remaining-input');
+    if (remEl) remEl.value = '0';
+
+    updateRetailInvoiceHeader();
+    renderRetailInvoices();
+
+    setTimeout(getAllUniqueRetailCustomers, 100);
+
+    // رسالة نجاح
+    const toast = document.createElement('div');
+    toast.className = 'fixed bottom-8 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-8 py-4 rounded-3xl shadow-xl z-50';
+    toast.textContent = '✅ تم حفظ فاتورة القطاعي بنجاح';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+
+// ==================== إعادة حساب كل فواتير العميل القطاعي ====================
+function recalculateAllRetailInvoicesForCustomer(customerName) {
+    if (!customerName || customerName === 'عميل غير محدد') return;
+
+    const customerInvoices = savedRetailInvoices
+        .map((inv, idx) => ({ ...inv, originalIndex: idx }))
+        .filter(inv => inv.customer === customerName)
+        .sort((a, b) => a.date - b.date);
+
+    let runningDebt = 0;
+
+    for (let i = 0; i < customerInvoices.length; i++) {
+        const inv = customerInvoices[i];
+        const realIndex = inv.originalIndex;
+
+        const currentTotal = Number(inv.total) || 0;
+        const paid = Number(inv.paid) || 0;
+
+        const grandTotal = currentTotal + runningDebt;
+        const remaining = grandTotal - paid;
+
+        savedRetailInvoices[realIndex].grandTotal = Number(grandTotal.toFixed(2));
+        savedRetailInvoices[realIndex].remaining = Number(Math.max(0, remaining).toFixed(2));
+
+        runningDebt = Math.max(0, remaining);
+    }
+}
+
+// ==================== عرض الفواتير السابقة (كاملة مثل التجار) ====================
+function renderRetailInvoices() {
+    const container = document.getElementById('saved-retail-invoices-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (savedRetailInvoices.length === 0) {
+        container.innerHTML = `<div class="bg-white rounded-2xl p-10 text-center text-gray-500"><p>لا توجد فواتير قطاعي محفوظة بعد</p></div>`;
+        return;
+    }
+
+    savedRetailInvoices.forEach((inv, index) => {
+        const dateObj = new Date(inv.date);
+        const formattedDate = dateObj.toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        const formattedTime = dateObj.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+
+        const currentTotal = Number(inv.total) || 0;
+        const previousDebt = getRetailCustomerPreviousDebt(inv.customer, index);
+        const grandTotal = currentTotal + previousDebt;
+        const paid = Number(inv.paid) || 0;
+        const remaining = grandTotal - paid;
+
+        const card = document.createElement('div');
+        card.className = 'bg-gray-50 rounded-xl p-4 shadow-sm';
+
+        card.innerHTML = `
+            <div class="flex justify-between items-center mb-3">
+                <div class="font-semibold">${inv.customer}</div>
+                <div class="text-gray-500 text-sm">${formattedDate} - ${formattedTime}</div>
+            </div>
+            <button onclick="toggleRetailInvoiceDetails(${index})" class="text-green-600 underline mb-3">عرض المنتجات</button>
+            <div id="retail-invoice-details-${index}" class="hidden">
+                <table class="w-full text-right border-collapse mb-4">
+                    <thead class="bg-gray-200"><tr>
+                        <th class="py-2 px-4 text-right">المنتج</th>
+                        <th class="py-2 px-4">المقاس</th>
+                        <th class="py-2 px-4">السعر</th>
+                        <th class="py-2 px-4">الكمية</th>
+                        <th class="py-2 px-4">الإجمالي</th>
+                    </tr></thead>
+                    <tbody>
+                        ${inv.items.map(item => `
+                            <tr class="border-b">
+                                <td class="py-2 px-4 text-right">${item.productName}</td>
+                                <td class="py-2 px-4 text-center">${item.size}</td>
+                                <td class="py-2 px-4 text-center">${item.price}</td>
+                                <td class="py-2 px-4 text-center">${item.qty}</td>
+                                <td class="py-2 px-4 text-center font-bold">${item.subtotal}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                <div class="bg-white rounded-2xl p-5 shadow-sm">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
+                        <div><div class="text-xs text-gray-500 mb-1">إجمالي الفاتورة الجديدة</div><div class="text-2xl font-bold text-blue-600">${currentTotal.toFixed(2)} جنيه</div></div>
+                        <div><div class="text-xs text-gray-500 mb-1">المبلغ المدفوع</div><div class="text-2xl font-bold text-green-600">${paid.toFixed(2)} جنيه</div></div>
+                        <div class="md:col-span-3 mt-4 pt-4 border-t"><div class="text-xs text-gray-500 mb-1">المتبقي النهائي</div><div class="text-3xl font-bold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}">${remaining.toFixed(2)} جنيه</div></div>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-4 mt-4">
+                    <button onclick="printRetailSavedInvoice(${index})" class="text-green-600 underline">طباعة</button>
+                    <button onclick="editRetailSavedInvoice(${index})" class="text-amber-600 underline">تعديل</button>
+                    <button onclick="deleteRetailSavedInvoice(${index})" class="text-red-600 underline">حذف</button>
+                </div>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+}
+
+window.toggleRetailInvoiceDetails = function(index) {
+    const detailsDiv = document.getElementById(`retail-invoice-details-${index}`);
+    if (detailsDiv) detailsDiv.classList.toggle('hidden');
+};
+
+// ==================== تعديل - حذف - طباعة ====================
+window.editRetailSavedInvoice = function(index) {
+    const invoice = savedRetailInvoices[index];
+    if (!invoice) return;
+    if (!confirm('هل تريد تعديل هذه الفاتورة القطاعية؟')) return;
+
+    editingRetailInvoiceIndex = index;
+    retailInvoice = JSON.parse(JSON.stringify(invoice.items));
+
+    const customerInput = document.getElementById('retail-customer-name');
+    if (customerInput) customerInput.value = invoice.customer;
+
+    const paidInput = document.getElementById('retail-paid-input');
+    if (paidInput) paidInput.value = Number(invoice.paid || 0).toFixed(2);
+
+    renderRetailTable();
+    updateRetailTotalAndRemaining();
+    updateRetailInvoiceHeader();
+
+    showSection('retail');
+
+    const toast = document.createElement('div');
+    toast.className = 'fixed bottom-8 left-1/2 -translate-x-1/2 bg-amber-600 text-white px-6 py-3 rounded-3xl shadow-xl z-50';
+    toast.textContent = '✏️ جاري تعديل فاتورة القطاعي...';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2000);
+};
+
+window.deleteRetailSavedInvoice = function(index) {
+    if (!confirm('هل أنت متأكد من حذف هذه الفاتورة القطاعية؟')) return;
+    savedRetailInvoices.splice(index, 1);
+    saveAllRetailInvoices();
+    renderRetailInvoices();
+    alert('✅ تم حذف الفاتورة');
+};
+
+// ==================== طباعة فاتورة قطاعي (نفس شكل التجار) ====================
+// ==================== طباعة فاتورة قطاعي ====================
+window.printRetailSavedInvoice = function(index) {
+    const inv = savedRetailInvoices[index];
+    if (!inv) return;
+
+    const dateObj = new Date(inv.date);
+    const formattedDate = dateObj.toLocaleDateString('ar-EG', { 
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
+    });
+    const formattedTime = dateObj.toLocaleTimeString('ar-EG', { 
+        hour: '2-digit', minute: '2-digit' 
+    });
+
+    const currentTotal = Number(inv.total) || 0;
+    const previousDebt = getRetailCustomerPreviousDebt(inv.customer, index);
+    const paid = Number(inv.paid) || 0;
+    const remaining = (currentTotal + previousDebt) - paid;
+
+    const html = `
+        <html dir="rtl" lang="ar">
+        <head>
+            <title>فاتورة قطاعي - ${inv.customer}</title>
+            <style>
+                body { 
+                    font-family: 'Cairo', Arial, sans-serif; 
+                    padding: 30px; 
+                    line-height: 1.6;
+                    background: #f9fafb;
+                }
+                .header {
+                    text-align: center;
+                    margin-bottom: 30px;
+                    border-bottom: 4px solid #10b981;
+                    padding-bottom: 15px;
+                }
+                .shop-name {
+                    font-size: 28px;
+                    font-weight: bold;
+                    color: #10b981;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin: 25px 0;
+                }
+                th, td {
+                    border: 1px solid #333;
+                    padding: 12px;
+                    text-align: center;
+                }
+                th {
+                    background-color: #ecfdf5;
+                    font-weight: 600;
+                    color: #065f46;
+                }
+                .totals {
+                    margin-top: 30px;
+                    display: grid;
+                    grid-template-columns: 1fr 1fr 1fr;
+                    gap: 15px;
+                }
+                .total-box {
+                    border: 2px solid #10b981;
+                    padding: 15px;
+                    text-align: center;
+                    border-radius: 8px;
+                    background: white;
+                }
+                .amount {
+                    font-size: 22px;
+                    font-weight: bold;
+                }
+                .red { color: #dc2626; }
+                .green { color: #16a34a; }
+                .emerald { color: #10b981; }
+                @media print {
+                    body { padding: 20px; }
+                    button, .no-print { display: none !important; }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <div class="shop-name">مصطفى الازهرى للادوات الصحيه</div>
+                <h2>فاتورة بيع قطاعي</h2>
+                <p>رقم الفاتورة: #${index + 1} &nbsp;&nbsp;&nbsp; التاريخ: ${formattedDate} - ${formattedTime}</p>
+            </div>
+
+            <div style="margin-bottom: 20px; font-size: 18px;">
+                <strong>اسم العميل:</strong> ${inv.customer}
+                ${previousDebt > 0 ? `<span style="color:#dc2626;"> (عليه ${previousDebt.toFixed(2)} جنيه سابقًا)</span>` : ''}
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>المنتج</th>
+                        <th>المقاس</th>
+                        <th>السعر</th>
+                        <th>الكمية</th>
+                        <th>الإجمالي</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${inv.items.map(item => `
+                        <tr>
+                            <td>${item.productName}</td>
+                            <td>${item.size}</td>
+                            <td>${Number(item.price).toFixed(2)}</td>
+                            <td>${item.qty}</td>
+                            <td>${Number(item.subtotal).toFixed(2)}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+
+            <div class="totals">
+                <div class="total-box">
+                    <h3 style="color:#10b981;">إجمالي الفاتورة الجديدة</h3>
+                    <div class="amount emerald">${currentTotal.toFixed(2)} جنيه</div>
+                </div>
+                <div class="total-box">
+                    <h3 style="color:#16a34a;">المبلغ المدفوع</h3>
+                    <div class="amount green">${paid.toFixed(2)} جنيه</div>
+                </div>
+                <div class="total-box" style="grid-column: 1 / -1; border-color: #dc2626;">
+                    <h3>المتبقي النهائي</h3>
+                    <div class="amount ${remaining > 0 ? 'red' : 'green'}">
+                        ${remaining.toFixed(2)} جنيه
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top: 50px; text-align: center; color: #666; font-size: 16px;">
+                شكرًا لتعاملك مع مصطفى الازهرى للادوات الصحية<br>
+                برجاء الاحتفاظ بالفاتورة
+            </div>
+        </body>
+        </html>
+    `;
+
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    
+    setTimeout(() => {
+        printWindow.print();
+    }, 600);
+};
+
+// ==================== اقتراح أسماء العملاء القطاعي ====================
+function getAllUniqueRetailCustomers() {
+    const customersSet = new Set();
+    savedRetailInvoices.forEach(inv => {
+        if (inv.customer && inv.customer !== 'عميل غير محدد') {
+            customersSet.add(inv.customer.trim());
+        }
+    });
+    allRetailCustomers = Array.from(customersSet).sort();
+    return allRetailCustomers;
+}
+
+function setupRetailCustomerAutocomplete() {
+    const customerInput = document.getElementById('retail-customer-name');
+    if (!customerInput) return;
+
+    let datalist = document.getElementById('retail-customers-datalist');
+    if (!datalist) {
+        datalist = document.createElement('datalist');
+        datalist.id = 'retail-customers-datalist';
+        document.body.appendChild(datalist);
+    }
+
+    customerInput.setAttribute('list', 'retail-customers-datalist');
+
+    function updateSuggestions() {
+        getAllUniqueRetailCustomers();
+        datalist.innerHTML = '';
+        allRetailCustomers.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            datalist.appendChild(opt);
+        });
+    }
+
+    customerInput.addEventListener('focus', updateSuggestions);
+    customerInput.addEventListener('input', updateRetailInvoiceHeader);
+}
+
+function updateRetailInvoiceHeader() {
+    const customerNameInput = document.getElementById('retail-customer-name');
+    const balanceEl = document.getElementById('retail-customer-balance');
+    if (!customerNameInput || !balanceEl) return;
+
+    const name = customerNameInput.value.trim() || 'عميل غير محدد';
+    const previousBalance = getRetailCustomerPreviousDebt(name, editingRetailInvoiceIndex);
+
+    if (previousBalance > 0) {
+        balanceEl.innerHTML = `<span class="text-red-600">عليه ${previousBalance.toFixed(2)} جنيه سابقًا</span>`;
+        balanceEl.className = "px-5 py-4 rounded-2xl text-sm font-medium bg-red-50 text-red-600 flex items-center min-w-[180px]";
+    } 
+    else if (previousBalance < 0) {
+        const credit = Math.abs(previousBalance);
+        balanceEl.innerHTML = `<span class="text-emerald-600">ليه رصيد زائد ${credit.toFixed(2)} جنيه</span>`;
+        balanceEl.className = "px-5 py-4 rounded-2xl text-sm font-medium bg-emerald-50 text-emerald-600 flex items-center min-w-[180px]";
+    } 
+    else {
+        balanceEl.innerHTML = `<span class="text-gray-500">لا يوجد رصيد سابق</span>`;
+        balanceEl.className = "px-5 py-4 rounded-2xl text-sm font-medium bg-gray-50 text-gray-500 flex items-center min-w-[180px]";
+    }
+}
+
+async function saveAllRetailInvoices() {
+    try {
+        await db.collection("appData").doc("retail_invoices").set({
+            savedRetailInvoices: savedRetailInvoices,
+            lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        console.log("✅ فواتير القطاعي تم حفظها على Firebase");
+    } catch (e) {
+        console.error("خطأ في حفظ فواتير القطاعي:", e);
+    }
+}
+
+async function loadRetailInvoices() {
+    try {
+        const doc = await db.collection("appData").doc("retail_invoices").get();
+        if (doc.exists) {
+            savedRetailInvoices = doc.data().savedRetailInvoices || [];
+        } else {
+            savedRetailInvoices = [];
+        }
+    } catch (e) {
+        console.error("خطأ في تحميل فواتير القطاعي:", e);
+        savedRetailInvoices = [];
+    }
+    renderRetailInvoices();
+}
+// دوال وهمية مؤقتة لإزالة الأخطاء في Console
+
+
+function clearRetailInvoice() {
+    if (confirm('هل تريد مسح الفاتورة القطاعية؟')) {
+        retailInvoice = [];
+        renderRetailTable();
+        updateRetailTotalAndRemaining();
+    }
+}
+
+
+// ==================== تعديل السعر لفواتير القطاعي (النسخة النهائية) ====================
+
+
+// تحديث عند اختيار المقاس (يرجع للسعر الأصلي)
+function updateRetailPriceDisplay() {
+    const productName = document.getElementById('retail-product-search').value.trim();
+    const size = document.getElementById('retail-size-select').value;
+
+    const product = products.find(p => p.name === productName);
+    const variant = product?.variants.find(v => v.size === size);
+
+    if (variant) {
+        retailPriceAdjustment = 0;                    // تصفير التعديل
+        const adjustInput = document.getElementById('retail-price-adjust');
+        if (adjustInput) adjustInput.value = 0;
+    }
+}
+
+// تطبيق التعديل تلقائياً عند الكتابة
+function applyRetailPriceAdjustment() {
+    const typeSelect = document.getElementById('retail-price-type');
+    const valueInput = document.getElementById('retail-price-adjust');
+
+    if (!typeSelect || !valueInput) return;
+
+    retailAdjustmentType = typeSelect.value;
+    retailPriceAdjustment = parseFloat(valueInput.value) || 0;
+}
+
+// ==================== إضافة منتج لفاتورة القطاعي (النسخة المحدثة) ====================
+function addToRetailInvoice() {
+    const productName = document.getElementById('retail-product-search').value.trim();
+    const size = document.getElementById('retail-size-select').value;
+    const qtyInput = document.getElementById('retail-qty-input');
+    const qty = parseInt(qtyInput ? qtyInput.value : 1) || 1;
+
+    if (!productName) return alert('❌ اختر المنتج');
+    if (!size) return alert('❌ اختر المقاس');
+    if (qty < 1) return alert('❌ الكمية غلط');
+
+    const product = products.find(p => p.name === productName);
+    if (!product) return alert('❌ المنتج غير موجود');
+
+    const variant = product.variants.find(v => v.size === size);
+    if (!variant) return alert('❌ المقاس غير موجود');
+
+    // التحقق من وجود تعديل
+    if (retailPriceAdjustment === 0) {
+        return alert('❌ اضف النسبه أو المبلغ للقطاعي أولاً');
+    }
+
+    let finalPrice = variant.price;
+
+    if (retailAdjustmentType === 'percent') {
+        finalPrice = variant.price * (1 + retailPriceAdjustment / 100);
+    } else {
+        finalPrice = variant.price + retailPriceAdjustment;
+    }
+
+    finalPrice = Math.max(0, finalPrice);   // منع السعر السالب
+
+    retailInvoice.push({
+        id: Date.now(),
+        productName: product.name,
+        size: size,
+        price: finalPrice,
+        qty: qty,
+        subtotal: finalPrice * qty
+    });
+
+    renderRetailTable();
+    updateRetailTotalAndRemaining();
+
+    // تصفير الكمية
+    if (qtyInput) qtyInput.value = 1;
+
+    // تصفير التعديل بعد الإضافة
+    retailPriceAdjustment = 0;
+    const adjustInput = document.getElementById('retail-price-adjust');
+    if (adjustInput) adjustInput.value = 0;
+
+    console.log(`تم إضافة ${product.name} بسعر معدل: ${finalPrice.toFixed(2)}`);
+}
+
+// ==================== ربط زرار الحفظ القطاعي ====================
+document.addEventListener('DOMContentLoaded', () => {
+    const saveRetailBtn = document.getElementById('save-retail-btn');
+    if (saveRetailBtn) {
+        saveRetailBtn.addEventListener('click', saveRetailInvoice);
+        console.log("✅ زرار حفظ فاتورة القطاعي تم ربطه بنجاح");
+    }
 });
 
 window.onload = startApp;
