@@ -11,6 +11,75 @@ let bulkEditCompany = null;     // الشركة اللي هنعدل أسعاره
 let bulkEditType = 'percent';   // 'percent' أو 'fixed'
 let allCustomers = [];   // عشان نحفظ أسماء الزبائن السابقين
 
+// ==================== قائمة الشركات (تصنيف المنتجات) - قابلة للتعديل ====================
+const DEFAULT_COMPANIES = [
+    { id: 'redsea',    label: 'البحر الأحمر' },
+    { id: 'aquadelta', label: 'أكوا دلتا' },
+    { id: 'dr',        label: 'Dr' },
+    { id: 'nawakel',   label: 'النواكل' },
+    { id: 'zahr',      label: 'الزهر' },
+    { id: 'khazanat',  label: 'خزانات' },
+    { id: 'kawabel',   label: 'كاوابيل + غطيان' },
+    { id: 'masaseer',  label: 'مواسير شعبي + رمادي' },
+    { id: 'extra',     label: 'اضافي' }
+];
+
+// قائمة الشركات الفعلية (تتحمل من Firebase، وتقدر تضيف/تعدل/تحذف منها)
+let companiesList = JSON.parse(JSON.stringify(DEFAULT_COMPANIES));
+
+// الشركات اللي فيها تعديل السعر بيتطبق على الفاتورة كلها مش على كل منتج لوحده
+const PERCENT_COMPANIES = ['redsea', 'aquadelta', 'dr'];
+
+function getCompanyLabel(id) {
+    const c = companiesList.find(c => c.id === id);
+    return c ? c.label : id;
+}
+
+async function saveCompanies() {
+    try {
+        await db.collection("appData").doc("companies").set({
+            companiesList: companiesList,
+            lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    } catch (e) {
+        console.error("خطأ في حفظ الشركات:", e);
+        localStorage.setItem('companiesList', JSON.stringify(companiesList));
+    }
+}
+
+async function loadCompanies() {
+    try {
+        const doc = await db.collection("appData").doc("companies").get();
+        if (doc.exists && Array.isArray(doc.data().companiesList) && doc.data().companiesList.length > 0) {
+            companiesList = doc.data().companiesList;
+        } else {
+            companiesList = JSON.parse(JSON.stringify(DEFAULT_COMPANIES));
+            await saveCompanies();
+        }
+    } catch (e) {
+        console.error("خطأ في تحميل الشركات:", e);
+        companiesList = JSON.parse(JSON.stringify(DEFAULT_COMPANIES));
+    }
+}
+
+// الشركة المختارة حاليًا لتصفية قائمة "منتجاتنا" (فلتر مستقل عن فلتر القطاعي)
+let productsSelectedCompany = '';
+
+// ==================== Toast Notifications (رسائل نجاح/خطأ موحدة) ====================
+function showToast(message, type = 'success') {
+    const palette = {
+        success: 'bg-emerald-600',
+        error: 'bg-red-600',
+        warning: 'bg-amber-500',
+        info: 'bg-brand-600'
+    };
+    const toast = document.createElement('div');
+    toast.className = `fixed bottom-6 left-1/2 -translate-x-1/2 ${palette[type] || palette.success} text-white px-6 py-3.5 rounded-2xl shadow-lifted z-[60] text-sm sm:text-base font-semibold max-w-[90vw] text-center`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2800);
+}
+
 // ==================== Retail (قطاعي) - متغيرات جديدة ====================
 let retailInvoice = [];
 let savedRetailInvoices = [];
@@ -18,6 +87,10 @@ let editingRetailInvoiceIndex = null;     // ← مهم جدًا
 let allRetailCustomers = [];              // للاقتراحات
 let retailPriceAdjustment = 0;   // قيمة الزيادة أو النقصان
 let retailAdjustmentType = 'percent';
+let retailSelectedCompany = '';  // الشركة المختارة حاليًا في فاتورة القطاعي
+let retailAdjustmentConfirmed = false;   // (باقية لتوافق قديم، لم تعد تُستخدم للحجب)
+let retailItemAdjustmentConfirmed = false; // هل المستخدم حط نسبة/قيمة الزيادة أو النقصان الأول قبل إضافة منتج (للشركات العادية غير الثلاثة)
+let retailStaging = [];   // قائمة مؤقتة لمنتجات الشركة المختارة (البحر الأحمر/أكوا دلتا/Dr) قبل ما تتضاف للفاتورة الكلية
 
 async function saveProducts() {
     try {
@@ -65,8 +138,127 @@ async function saveAllInvoices() {
     }
 }
 
+// ==================== إحصائيات سريعة (منتجاتنا) ====================
+function updateProductsStats() {
+    const countEl = document.getElementById('stat-products-count');
+    const variantsEl = document.getElementById('stat-variants-count');
+    if (!countEl || !variantsEl) return;
+
+    const validProducts = Array.isArray(products) ? products.filter(p => p && Array.isArray(p.variants)) : [];
+    const totalVariants = validProducts.reduce((sum, p) => sum + p.variants.length, 0);
+
+    countEl.textContent = validProducts.length;
+    variantsEl.textContent = totalVariants;
+}
+
+// ==================== تصفية قائمة المنتجات (بحث + شركة) ====================
+function applyProductsFilter() {
+    const searchBox = document.getElementById('product-search-box');
+    const query = searchBox ? searchBox.value.trim().toLowerCase() : '';
+
+    let filtered = Array.isArray(products) ? products : [];
+
+    if (productsSelectedCompany) {
+        filtered = filtered.filter(p => Array.isArray(p.companies) && p.companies.includes(productsSelectedCompany));
+    }
+
+    if (query) {
+        filtered = filtered.filter(p => (p.name || '').toLowerCase().includes(query));
+    }
+
+    renderProducts(filtered);
+}
+
+// ==================== أزرار تصفية "منتجاتنا" حسب الشركة ====================
+function renderProductsCompanyFilter() {
+    const container = document.getElementById('products-company-filter');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const allBtn = document.createElement('button');
+    allBtn.type = 'button';
+    allBtn.textContent = 'كل الشركات';
+    allBtn.className = 'chip';
+    allBtn.dataset.companyId = '';
+    allBtn.onclick = () => selectProductsCompanyFilter('');
+    container.appendChild(allBtn);
+
+    companiesList.forEach(c => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = c.label;
+        btn.className = 'chip';
+        btn.dataset.companyId = c.id;
+        btn.onclick = () => selectProductsCompanyFilter(c.id);
+        container.appendChild(btn);
+    });
+
+    updateProductsCompanyFilterActiveState();
+}
+
+function updateProductsCompanyFilterActiveState() {
+    const container = document.getElementById('products-company-filter');
+    if (!container) return;
+    Array.from(container.children).forEach(btn => {
+        btn.classList.toggle('chip-active', btn.dataset.companyId === productsSelectedCompany);
+    });
+}
+
+function selectProductsCompanyFilter(companyId) {
+    productsSelectedCompany = companyId;
+    updateProductsCompanyFilterActiveState();
+    applyProductsFilter();
+}
+
+// ==================== تحذير الكمية القليلة (كل المنتجات اللي وصلت لحد التنبيه أو أقل) ====================
+function updateLowStockAlert() {
+    const alertBox = document.getElementById('low-stock-alert');
+    const countEl = document.getElementById('low-stock-count');
+    const panel = document.getElementById('low-stock-panel');
+    if (!alertBox || !countEl || !panel) return;
+
+    const lowItems = [];
+    (Array.isArray(products) ? products : []).forEach(p => {
+        if (!p || !Array.isArray(p.variants)) return;
+        p.variants.forEach(v => {
+            const hasStockInfo = v.stock !== undefined && v.stock !== null && v.stock !== '';
+            const stock = Number(v.stock) || 0;
+            const threshold = Number(v.alertThreshold) || 0;
+            if (hasStockInfo && threshold > 0 && stock <= threshold) {
+                lowItems.push({ productName: p.name, size: v.size, stock });
+            }
+        });
+    });
+
+    if (lowItems.length === 0) {
+        alertBox.classList.add('hidden');
+        panel.classList.add('hidden');
+        panel.innerHTML = '';
+        return;
+    }
+
+    alertBox.classList.remove('hidden');
+    countEl.textContent = lowItems.length;
+    panel.innerHTML = lowItems.map(it => `
+        <div class="flex items-center justify-between bg-red-50 rounded-xl px-4 py-2.5">
+            <div>
+                <div class="font-semibold text-red-800">${it.productName}</div>
+                <div class="text-xs text-red-500">${it.size}</div>
+            </div>
+            <div class="text-red-700 font-bold">متبقي ${it.stock}</div>
+        </div>
+    `).join('');
+}
+
+function toggleLowStockPanel() {
+    const panel = document.getElementById('low-stock-panel');
+    if (panel) panel.classList.toggle('hidden');
+}
+
 // ==================== عرض المنتجات (بعد التحديث) ====================
 function renderProducts(filtered = products) {
+    updateProductsStats();
+    updateLowStockAlert();
     const container = document.getElementById('products-list');
     if (!container) return;
     container.innerHTML = '';
@@ -76,9 +268,10 @@ function renderProducts(filtered = products) {
 
     if (validProducts.length === 0) {
         container.innerHTML = `
-            <div class="bg-white rounded-2xl p-10 text-center text-gray-500">
+            <div class="card empty-state">
                 <div class="text-6xl mb-4">🛒</div>
-                <p class="text-xl font-medium">لا يوجد منتجات</p>
+                <p class="text-lg font-bold text-slate-600">لا يوجد منتجات مطابقة</p>
+                <p class="text-sm text-slate-400 mt-1">جرّب تغيير كلمة البحث أو الشركة المختارة</p>
             </div>
         `;
         return;
@@ -89,10 +282,19 @@ function renderProducts(filtered = products) {
         product.variants.forEach(variant => {
             const price = Number(variant.price);
             const priceDisplay = isNaN(price) ? '—' : price.toFixed(2);
+            const stock = Number(variant.stock) || 0;
+            const threshold = Number(variant.alertThreshold) || 0;
+            const hasStockInfo = variant.stock !== undefined && variant.stock !== null && variant.stock !== '';
+            const isLowStock = hasStockInfo && threshold > 0 && stock <= threshold;
+
             rowsHTML += `
-                <tr class="hover:bg-gray-50 transition-colors">
+                <tr class="hover:bg-gray-50 transition-colors ${isLowStock ? 'bg-rose-50' : ''}">
                     <td class="px-4 py-3 text-right font-medium">${variant.size || 'غير محدد'}</td>
                     <td class="px-4 py-3 text-center font-bold text-blue-700">${priceDisplay} <span class="text-sm text-gray-500">ج.م</span></td>
+                    <td class="px-4 py-3 text-center">${hasStockInfo ? stock : '—'}</td>
+                    <td class="px-4 py-3 text-center">
+                        ${isLowStock ? `<span class="badge bg-rose-100 text-rose-700">⚠️ الكمية قليلة (متبقي ${stock})</span>` : ''}
+                    </td>
                 </tr>
             `;
         });
@@ -100,42 +302,177 @@ function renderProducts(filtered = products) {
         let companyBadges = '';
         if (Array.isArray(product.companies) && product.companies.length > 0) {
             companyBadges = product.companies.map(c => {
-                if (c === 'redsea') return `<span class="bg-red-100 text-red-700 text-xs px-3 py-1 rounded-full">البحر الأحمر</span>`;
-                if (c === 'aquadelta') return `<span class="bg-blue-100 text-blue-700 text-xs px-3 py-1 rounded-full">أكوا دلتا</span>`;
-                return '';
+                const label = getCompanyLabel(c);
+                return `<span class="bg-white/15 text-white text-xs px-3 py-1 rounded-full font-medium">${label}</span>`;
             }).join(' ');
         }
 
         const card = document.createElement('div');
-        card.className = 'bg-white rounded-2xl shadow-md overflow-hidden mb-6';
+        card.className = 'card overflow-hidden';
         card.innerHTML = `
-            <div class="bg-gradient-to-r from-blue-600 to-blue-800 px-5 py-4 text-white">
+            <div class="bg-brand-600 px-5 py-4 text-white">
                 <div class="flex justify-between items-center flex-wrap gap-2">
-                    <h3 class="text-xl font-bold">${product.name}</h3>
-                    <div class="flex items-center gap-2">
+                    <h3 class="text-lg sm:text-xl font-bold">${product.name}</h3>
+                    <div class="flex items-center gap-2 flex-wrap justify-end">
                         ${companyBadges}
-                        <span class="bg-white/20 px-3 py-1 rounded-full text-sm">${product.variants.length} مقاس</span>
+                        <span class="bg-white/20 px-3 py-1 rounded-full text-xs sm:text-sm font-medium">${product.variants.length} مقاس</span>
                     </div>
                 </div>
             </div>
             <div class="overflow-x-auto">
-                <table class="w-full text-right border-collapse">
-                    <thead class="bg-gray-100 text-gray-700 text-sm">
+                <table class="table-modern">
+                    <thead>
                         <tr>
-                            <th class="px-4 py-3 font-semibold">المقاس</th>
-                            <th class="px-4 py-3 font-semibold text-center">السعر</th>
+                            <th class="text-right">المقاس</th>
+                            <th class="text-center">السعر</th>
+                            <th class="text-center">الكمية بالمخزن</th>
+                            <th class="text-center">تحذيرات</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-200">${rowsHTML}</tbody>
+                    <tbody class="divide-y divide-slate-100">${rowsHTML}</tbody>
                 </table>
             </div>
-            <div class="px-5 py-4 bg-gray-50 flex justify-end gap-3">
-                <button onclick="editProduct(${product.id})" class="bg-amber-100 hover:bg-amber-200 text-amber-800 px-5 py-2 rounded-lg">✏️ تعديل</button>
-                <button onclick="deleteProduct(${product.id})" class="bg-red-100 hover:bg-red-200 text-red-800 px-5 py-2 rounded-lg">🗑️ حذف</button>
+            <div class="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex justify-end gap-2">
+                <button onclick="editProduct(${product.id})" class="btn-secondary !py-2 !px-4 text-sm">✏️ تعديل</button>
+                <button onclick="deleteProduct(${product.id})" class="btn-danger !py-2 !px-4 text-sm">🗑️ حذف</button>
             </div>
         `;
         container.appendChild(card);
     });
+}
+
+// ==================== مودال المنتج - عرض الشركات المختارة (Chips) ====================
+function renderSelectedCompaniesChips() {
+    const container = document.getElementById('product-companies-container');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!Array.isArray(editingCompanies) || editingCompanies.length === 0) {
+        container.innerHTML = `<span class="text-sm text-slate-400">لسه مفيش شركات متختارة لهذا المنتج</span>`;
+        return;
+    }
+
+    editingCompanies.forEach(id => {
+        const chip = document.createElement('span');
+        chip.className = 'badge bg-brand-50 text-brand-700 border border-brand-100';
+        chip.textContent = getCompanyLabel(id);
+        container.appendChild(chip);
+    });
+}
+
+// ==================== مودال إدارة الشركات (إضافة / تعديل / حذف) ====================
+function openCompanyManager() {
+    renderCompanyManagerList();
+    const modal = document.getElementById('company-manager-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+function closeCompanyManager() {
+    const modal = document.getElementById('company-manager-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    // تحديث الشيبس في مودال المنتج بعد الإغلاق
+    renderSelectedCompaniesChips();
+}
+
+function renderCompanyManagerList() {
+    const container = document.getElementById('company-manager-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!Array.isArray(companiesList) || companiesList.length === 0) {
+        container.innerHTML = `<div class="text-center text-slate-400 py-6">مفيش شركات لسه، ضيف واحدة تحت 👇</div>`;
+        return;
+    }
+
+    companiesList.forEach(c => {
+        const isChecked = Array.isArray(editingCompanies) && editingCompanies.includes(c.id);
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-2 bg-slate-50 rounded-xl p-3';
+        row.innerHTML = `
+            <label class="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
+                <input type="checkbox" ${isChecked ? 'checked' : ''}
+                       onchange="toggleCompanySelection('${c.id}', this.checked)"
+                       class="w-5 h-5 accent-brand-600 shrink-0">
+                <span id="company-label-${c.id}" class="font-medium text-slate-700 truncate">${c.label}</span>
+            </label>
+            <button type="button" onclick="startRenameCompany('${c.id}')" class="btn-secondary !py-1.5 !px-3 text-xs shrink-0">✏️ تعديل</button>
+            <button type="button" onclick="deleteCompanyEntry('${c.id}')" class="btn-danger !py-1.5 !px-3 text-xs shrink-0">🗑️ حذف</button>
+        `;
+        container.appendChild(row);
+    });
+}
+
+function toggleCompanySelection(id, checked) {
+    if (!Array.isArray(editingCompanies)) editingCompanies = [];
+    if (checked) {
+        if (!editingCompanies.includes(id)) editingCompanies.push(id);
+    } else {
+        editingCompanies = editingCompanies.filter(c => c !== id);
+    }
+}
+
+function startRenameCompany(id) {
+    const c = companiesList.find(c => c.id === id);
+    if (!c) return;
+    const newLabel = prompt('اكتب الاسم الجديد للشركة:', c.label);
+    if (newLabel === null) return;
+    const trimmed = newLabel.trim();
+    if (!trimmed) return alert('❌ الاسم لا يمكن أن يكون فارغ');
+    c.label = trimmed;
+    saveCompanies();
+    renderCompanyManagerList();
+    renderProductsCompanyFilter();
+    populateRetailCompanyFilter();
+    applyProductsFilter();
+    showToast('✅ تم تعديل اسم الشركة', 'success');
+}
+
+function deleteCompanyEntry(id) {
+    const c = companiesList.find(c => c.id === id);
+    if (!c) return;
+    if (!confirm(`هل أنت متأكد من حذف شركة "${c.label}"؟ هيتشال من كل المنتجات المرتبطة بيها.`)) return;
+
+    companiesList = companiesList.filter(c => c.id !== id);
+    editingCompanies = Array.isArray(editingCompanies) ? editingCompanies.filter(cid => cid !== id) : [];
+
+    // تنظيف المنتجات اللي كانت مرتبطة بالشركة دي
+    products.forEach(p => {
+        if (Array.isArray(p.companies)) {
+            p.companies = p.companies.filter(cid => cid !== id);
+        }
+    });
+
+    saveCompanies();
+    saveProducts();
+    renderCompanyManagerList();
+    renderProductsCompanyFilter();
+    populateRetailCompanyFilter();
+    applyProductsFilter();
+    showToast('🗑️ تم حذف الشركة', 'error');
+}
+
+function addNewCompanyEntry() {
+    const input = document.getElementById('new-company-name');
+    if (!input) return;
+    const name = input.value.trim();
+    if (!name) return alert('❌ اكتب اسم الشركة الجديدة');
+
+    const id = 'c_' + Date.now();
+    companiesList.push({ id, label: name });
+
+    if (!Array.isArray(editingCompanies)) editingCompanies = [];
+    editingCompanies.push(id);
+
+    input.value = '';
+    saveCompanies();
+    renderCompanyManagerList();
+    renderProductsCompanyFilter();
+    populateRetailCompanyFilter();
+    showToast('✅ تم إضافة الشركة', 'success');
 }
 
 // ==================== مودال المنتج ====================
@@ -154,11 +491,23 @@ function renderVariantsInModal() {
 
     editingVariants.forEach((variant, index) => {
         const row = document.createElement('div');
-        row.className = 'flex gap-3 items-center bg-gray-50 rounded-2xl p-3';
+        row.className = 'bg-gray-50 rounded-2xl p-3 space-y-2';
         row.innerHTML = `
-            <input type="text" value="${variant.size || ''}" oninput="updateVariantSize(${index}, this.value)" class="flex-1 px-4 py-3 rounded-xl border focus:border-blue-400 text-lg">
-            <input type="number" step="0.01" min="0" value="${variant.price || ''}" oninput="updateVariantPrice(${index}, this.value)" class="w-28 px-4 py-3 rounded-xl border focus:border-blue-400 text-lg text-center">
-            <button onclick="removeVariant(${index})" class="w-9 h-9 flex items-center justify-center text-red-500 text-2xl hover:bg-red-100 rounded-xl">×</button>
+            <div class="flex gap-3 items-center">
+                <input type="text" placeholder="المقاس" value="${variant.size || ''}" oninput="updateVariantSize(${index}, this.value)" class="flex-1 px-4 py-3 rounded-xl border focus:border-blue-400 text-lg">
+                <input type="number" step="0.01" min="0" placeholder="السعر" value="${variant.price || ''}" oninput="updateVariantPrice(${index}, this.value)" class="w-28 px-4 py-3 rounded-xl border focus:border-blue-400 text-lg text-center">
+                <button onclick="removeVariant(${index})" class="w-9 h-9 flex items-center justify-center text-red-500 text-2xl hover:bg-red-100 rounded-xl shrink-0">×</button>
+            </div>
+            <div class="flex gap-3 items-center">
+                <div class="flex-1">
+                    <label class="text-xs text-slate-400 mb-1 block">الكمية المتاحة بالمخزن</label>
+                    <input type="number" step="1" min="0" placeholder="الكمية" value="${variant.stock || ''}" oninput="updateVariantStock(${index}, this.value)" class="w-full px-4 py-2.5 rounded-xl border focus:border-blue-400 text-center">
+                </div>
+                <div class="flex-1">
+                    <label class="text-xs text-slate-400 mb-1 block">تحذيرات (حد التنبيه)</label>
+                    <input type="number" step="1" min="0" placeholder="مثلاً 5" value="${variant.alertThreshold || ''}" oninput="updateVariantAlert(${index}, this.value)" class="w-full px-4 py-2.5 rounded-xl border focus:border-blue-400 text-center">
+                </div>
+            </div>
         `;
         container.appendChild(row);
     });
@@ -166,9 +515,11 @@ function renderVariantsInModal() {
 
 function updateVariantSize(index, value) { if (editingVariants[index]) editingVariants[index].size = value; }
 function updateVariantPrice(index, value) { if (editingVariants[index]) editingVariants[index].price = parseFloat(value) || 0; }
+function updateVariantStock(index, value) { if (editingVariants[index]) editingVariants[index].stock = parseFloat(value) || 0; }
+function updateVariantAlert(index, value) { if (editingVariants[index]) editingVariants[index].alertThreshold = parseFloat(value) || 0; }
 
 function addVariantRow() {
-    editingVariants.push({ size: '', price: 0 });
+    editingVariants.push({ size: '', price: 0, stock: 0, alertThreshold: 0 });
     renderVariantsInModal();
 }
 
@@ -184,9 +535,8 @@ function openAddProductModal() {
     document.getElementById('modal-title').textContent = 'إضافة منتج جديد';
     document.getElementById('product-name').value = '';
     
-    // إعادة تعيين الـ checkboxes
-    document.getElementById('company-redsea').checked = false;
-    document.getElementById('company-aquadelta').checked = false;
+    // إعادة تعيين الشركات المختارة
+    renderSelectedCompaniesChips();
     
     renderVariantsInModal();
     const modal = document.getElementById('product-modal');
@@ -206,8 +556,7 @@ function editProduct(id) {
     
     // تحميل الشركات المختارة
     editingCompanies = Array.isArray(product.companies) ? [...product.companies] : [];
-    document.getElementById('company-redsea').checked = editingCompanies.includes('redsea');
-    document.getElementById('company-aquadelta').checked = editingCompanies.includes('aquadelta');
+    renderSelectedCompaniesChips();
 
     renderVariantsInModal();
 
@@ -229,13 +578,16 @@ function saveProduct() {
     if (!Array.isArray(editingVariants) || editingVariants.length === 0) 
         return alert('❌ لازم تضيف مقاس واحد على الأقل');
 
-    const selectedCompanies = [];
-    if (document.getElementById('company-redsea').checked) selectedCompanies.push('redsea');
-    if (document.getElementById('company-aquadelta').checked) selectedCompanies.push('aquadelta');
+    const selectedCompanies = Array.isArray(editingCompanies) ? [...editingCompanies] : [];
 
     const cleanVariants = editingVariants
         .filter(v => (v.size || '').trim() !== '' && parseFloat(v.price) > 0)
-        .map(v => ({ size: v.size.trim(), price: parseFloat(v.price) }));
+        .map(v => ({
+            size: v.size.trim(),
+            price: parseFloat(v.price),
+            stock: parseFloat(v.stock) || 0,
+            alertThreshold: parseFloat(v.alertThreshold) || 0
+        }));
 
     if (cleanVariants.length === 0) return alert('❌ تأكد إن كل مقاس له اسم وسعر صحيح');
 
@@ -256,23 +608,20 @@ function saveProduct() {
     }
 
     saveProducts();           // ← Firebase
-    renderProducts();
+    applyProductsFilter();
     populateProductDatalist();
     closeModal();
 
-    const toast = document.createElement('div');
-    toast.className = 'fixed bottom-8 left-1/2 -translate-x-1/2 bg-green-600 text-white px-8 py-4 rounded-3xl shadow-xl z-50';
-    toast.textContent = editingProductId !== null ? '✅ تم تعديل المنتج' : '✅ تم إضافة المنتج بنجاح';
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2500);
+    showToast(editingProductId !== null ? '✅ تم تعديل المنتج' : '✅ تم إضافة المنتج بنجاح', 'success');
 }
 
 function deleteProduct(id) {
     if (!confirm('هل أنت متأكد من حذف المنتج ده؟')) return;
     products = products.filter(p => p.id !== id);
     saveProducts();           // ← Firebase
-    renderProducts();
+    applyProductsFilter();
     populateProductDatalist();
+    showToast('🗑️ تم حذف المنتج', 'error');
 }
 
 // ==================== الفاتورة ====================
@@ -462,6 +811,8 @@ function saveCurrentInvoice() {
     renderSavedInvoices();
 
     setTimeout(() => getAllUniqueCustomers(), 100);
+
+    showToast('✅ تم حفظ الفاتورة بنجاح', 'success');
 }
 
 // ====================== اقتراح أسماء الزبائن ======================
@@ -815,7 +1166,7 @@ function deleteSavedInvoice(index) {
     savedInvoices.splice(index, 1);
     saveAllInvoices();        // ← Firebase
     renderSavedInvoices();
-    alert('✅ تم حذف الفاتورة');
+    showToast('🗑️ تم حذف الفاتورة', 'error');
 }
 
 function editSavedInvoice(index) {
@@ -845,11 +1196,7 @@ function editSavedInvoice(index) {
 
     showSection('invoice');
 
-    const toast = document.createElement('div');
-    toast.className = 'fixed bottom-8 left-1/2 -translate-x-1/2 bg-amber-600 text-white px-6 py-3 rounded-3xl shadow-xl z-50';
-    toast.textContent = '✏️ جاري تعديل الفاتورة...';
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2000);
+    showToast('✏️ جاري تعديل الفاتورة...', 'warning');
 }
 
 function printSavedInvoice(index) {
@@ -883,13 +1230,13 @@ function printSavedInvoice(index) {
                 .header {
                     text-align: center;
                     margin-bottom: 30px;
-                    border-bottom: 3px solid #1e40af;
+                    border-bottom: 3px solid #1E3A5F;
                     padding-bottom: 15px;
                 }
                 .shop-name {
                     font-size: 28px;
                     font-weight: bold;
-                    color: #1e40af;
+                    color: #1E3A5F;
                 }
                 table {
                     width: 100%;
@@ -928,7 +1275,7 @@ function printSavedInvoice(index) {
                 }
                 .red { color: #dc2626; }
                 .green { color: #16a34a; }
-                .blue { color: #1e40af; }
+                .blue { color: #1E3A5F; }
                 .purple { color: #7c3aed; }
                 @media print {
                     body { padding: 20px; }
@@ -1045,7 +1392,9 @@ function showSection(section) {
         if (btnRetail) btnRetail.classList.add('border-b-4', 'border-green-600', 'text-green-600');
 
         // مهم: تحديث الاقتراحات والمنتجات
-        populateProductDatalist();           // للبحث عن المنتجات
+        populateRetailCompanyFilter();       // اختيار الشركة
+        populateRetailProductDatalist(retailSelectedCompany); // للبحث عن المنتجات
+        toggleRetailAdjustmentUI();          // إظهار/إخفاء نوع تعديل السعر المناسب
         updateRetailInvoiceHeader();         // عرض اسم العميل + الدين السابق
     }
 }
@@ -1077,13 +1426,27 @@ function loadCustomersBalance() {
 }
 
 function listenToDataChanges() {
+    // الاستماع للشركات
+    db.collection("appData").doc("companies")
+        .onSnapshot((doc) => {
+            if (doc.exists && Array.isArray(doc.data().companiesList)) {
+                companiesList = doc.data().companiesList;
+                renderProductsCompanyFilter();
+                populateRetailCompanyFilter();
+                if (document.getElementById('company-manager-modal') && !document.getElementById('company-manager-modal').classList.contains('hidden')) {
+                    renderCompanyManagerList();
+                }
+            }
+        });
+
     // الاستماع للمنتجات
     db.collection("appData").doc("products")
         .onSnapshot((doc) => {
             if (doc.exists) {
                 products = doc.data().products || [];
-                renderProducts();
+                applyProductsFilter();
                 populateProductDatalist();
+                populateRetailProductDatalist(retailSelectedCompany);
             }
         });
 
@@ -1122,16 +1485,22 @@ async function loadSavedInvoices() {
 }
 
 async function startApp() {
+    await loadCompanies();
     await loadProducts();
     await loadSavedInvoices();
     
     // أضف تحميل فواتير القطاعي هنا أيضًا
     await loadRetailInvoices();        // ← أضف هذا السطر
 
-    renderProducts();
+    renderProductsCompanyFilter();     // ← أزرار تصفية منتجاتنا حسب الشركة
+    applyProductsFilter();
     populateProductDatalist();
     renderSavedInvoices();
     renderRetailInvoices();            // ← أضف هذا أيضًا
+
+    populateRetailCompanyFilter();
+    populateRetailProductDatalist(retailSelectedCompany);
+    toggleRetailAdjustmentUI();
 
     setupCustomerAutocomplete();
     setupRetailCustomerAutocomplete();
@@ -1144,13 +1513,28 @@ async function startApp() {
 
 // ====================== تعديل الأسعار جماعي ======================
 
+function renderBulkCompanyButtons() {
+    const container = document.getElementById('bulk-companies-container');
+    if (!container) return;
+    container.innerHTML = '';
+
+    companiesList.forEach(c => {
+        const btn = document.createElement('button');
+        btn.id = `btn-${c.id}`;
+        btn.type = 'button';
+        btn.setAttribute('onclick', `selectCompanyForBulk('${c.id}')`);
+        btn.className = 'py-5 rounded-2xl border-2 border-gray-300 font-medium text-lg hover:border-amber-500 transition-all';
+        btn.textContent = c.label;
+        container.appendChild(btn);
+    });
+}
+
 function openBulkPriceModal() {
     bulkEditCompany = null;
     bulkEditType = 'percent';
     
     // إعادة تعيين الأزرار
-    document.getElementById('btn-redsea').classList.remove('border-amber-500', 'bg-amber-50');
-    document.getElementById('btn-aquadelta').classList.remove('border-amber-500', 'bg-amber-50');
+    renderBulkCompanyButtons();
     document.getElementById('btn-percent').classList.add('border-amber-500', 'bg-amber-50');
     document.getElementById('btn-fixed').classList.remove('border-amber-500', 'bg-amber-50');
     
@@ -1179,11 +1563,12 @@ function selectCompanyForBulk(company) {
     bulkEditCompany = company;
     
     // تغيير الستايل للأزرار
-    document.getElementById('btn-redsea').classList.toggle('border-amber-500', company === 'redsea');
-    document.getElementById('btn-redsea').classList.toggle('bg-amber-50', company === 'redsea');
-    
-    document.getElementById('btn-aquadelta').classList.toggle('border-amber-500', company === 'aquadelta');
-    document.getElementById('btn-aquadelta').classList.toggle('bg-amber-50', company === 'aquadelta');
+    companiesList.forEach(c => {
+        const btn = document.getElementById(`btn-${c.id}`);
+        if (!btn) return;
+        btn.classList.toggle('border-amber-500', company === c.id);
+        btn.classList.toggle('bg-amber-50', company === c.id);
+    });
 }
 
 function setBulkEditType(type) {
@@ -1241,7 +1626,7 @@ function applyBulkPriceChange() {
     else if (bulkEditType === 'fixed') actionText = `زيادة ${value} جنيه`;
     else if (bulkEditType === 'minus_fixed') actionText = `نقصان ${value} جنيه`;
 
-    const confirmMsg = `هل أنت متأكدة من  ${actionText} على كل أسعار منتجات شركة ${bulkEditCompany === 'redsea' ? 'البحر الأحمر' : 'أكوا دلتا'}؟`;
+    const confirmMsg = `هل أنت متأكدة من  ${actionText} على كل أسعار منتجات شركة ${getCompanyLabel(bulkEditCompany)}؟`;
 
     if (!confirm(confirmMsg)) {
         return;   // المستخدم ضغط إلغاء
@@ -1277,25 +1662,17 @@ function applyBulkPriceChange() {
     });
 
     if (updatedCount === 0) {
-        alert(`⚠️  لا يوجد منتجات تابعة لشركة ${bulkEditCompany === 'redsea' ? 'البحر الأحمر' : 'أكوا دلتا'}`);
+        alert(`⚠️  لا يوجد منتجات تابعة لشركة ${getCompanyLabel(bulkEditCompany)}`);
     } else {
         saveProducts();
-        renderProducts();
-        alert(`✅ تم تعديل  ${updatedCount} أسعار  منتج بنجاح`);
+        applyProductsFilter();
+        showToast(`✅ تم تعديل ${updatedCount} من أسعار المنتجات بنجاح`, 'success');
     }
 
     closeBulkPriceModal();
 }
 
-document.getElementById('product-search-box').addEventListener('input', function () {
-    const query = this.value.trim().toLowerCase();
-
-    const filteredProducts = query === ""
-        ? products
-        : products.filter(p => p.name.toLowerCase().includes(query));
-
-    renderProducts(filteredProducts);
-});
+document.getElementById('product-search-box').addEventListener('input', applyProductsFilter);
 
 function populateSizeSelect() {
     const productInput = document.getElementById('product-search');
@@ -1322,6 +1699,261 @@ document.getElementById('product-search').addEventListener('input', () => {
 });
 
 
+// ==================== Retail - اختيار الشركة ====================
+function populateRetailCompanyFilter() {
+    const select = document.getElementById('retail-company-filter');
+    if (!select) return;
+
+    const previousValue = select.value || retailSelectedCompany;
+    select.innerHTML = '<option value="">كل الشركات</option>';
+    companiesList.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.label;
+        select.appendChild(opt);
+    });
+    select.value = previousValue || '';
+}
+
+function handleRetailCompanyChange() {
+    const select = document.getElementById('retail-company-filter');
+    const newCompany = select ? select.value : '';
+
+    // لو فيه منتجات لسه في القائمة المؤقتة لشركة تانية، نتأكد قبل ما نمسحها
+    if (retailStaging.length > 0 && newCompany !== retailSelectedCompany) {
+        const ok = confirm('هتفقد المنتجات اللي لسه في القائمة المؤقتة لـ "' + getCompanyLabel(retailSelectedCompany) + '" لو غيّرت الشركة. عايز تكمل؟');
+        if (!ok) {
+            if (select) select.value = retailSelectedCompany;
+            return;
+        }
+        retailStaging = [];
+    }
+
+    retailSelectedCompany = newCompany;
+
+    // تصفير حقل المنتج والمقاس عند تغيير الشركة
+    const productInput = document.getElementById('retail-product-search');
+    if (productInput) productInput.value = '';
+    const sizeSelect = document.getElementById('retail-size-select');
+    if (sizeSelect) sizeSelect.innerHTML = '<option value="">اختر المقاس...</option>';
+
+    populateRetailProductDatalist(retailSelectedCompany);
+    toggleRetailAdjustmentUI();
+    renderRetailStaging();
+}
+
+function populateRetailProductDatalist(companyId = '') {
+    const dl = document.getElementById('retail-products-datalist');
+    if (!dl) return;
+    dl.innerHTML = '';
+
+    const filtered = companyId
+        ? products.filter(p => Array.isArray(p.companies) && p.companies.includes(companyId))
+        : products;
+
+    filtered.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.name;
+        dl.appendChild(opt);
+    });
+}
+
+// إظهار مربع تعديل السعر لكل منتج، أو مربع تعديل السعر على الفاتورة كلها
+// حسب الشركة المختارة (البحر الأحمر / أكوا دلتا / Dr تتعامل على مستوى الفاتورة)
+function toggleRetailAdjustmentUI() {
+    const perItemBlock = document.getElementById('retail-per-item-adjust-block');
+    const invoiceLevelBlock = document.getElementById('retail-invoice-level-adjust');
+    if (!perItemBlock || !invoiceLevelBlock) return;
+
+    if (PERCENT_COMPANIES.includes(retailSelectedCompany)) {
+        perItemBlock.classList.add('hidden');
+        invoiceLevelBlock.classList.remove('hidden');
+
+        // تصفير تعديل السعر لكل منتج، مش هيتطبق للشركات دي
+        retailPriceAdjustment = 0;
+        const adjustInput = document.getElementById('retail-price-adjust');
+        if (adjustInput) adjustInput.value = 0;
+    } else {
+        perItemBlock.classList.remove('hidden');
+        invoiceLevelBlock.classList.add('hidden');
+    }
+}
+
+// باقية لتوافق قديم (مش بتحجب حاجة دلوقتي)
+function markRetailAdjustmentConfirmed() {
+    retailAdjustmentConfirmed = true;
+}
+
+// ==================== عرض القائمة المؤقتة (Staging) لمنتجات الشركة المختارة ====================
+// (البحر الأحمر / أكوا دلتا / Dr) - المنتجات هنا لسه مضافتش للفاتورة الكلية ومفيهاش تعديل سعر
+function renderRetailStaging() {
+    const container = document.getElementById('retail-staging-container');
+    if (!container) return;
+
+    if (retailStaging.length === 0) {
+        container.innerHTML = `<p class="text-sm text-rose-300 mb-4">لسه معملتش إضافة منتجات — اختار منتج ومقاس وكمية واضغط "أضف" فوق، وهيتضافوا هنا الأول.</p>`;
+        return;
+    }
+
+    container.innerHTML = `
+        <label class="block text-sm font-semibold mb-3 text-rose-600">المنتجات المضافة مؤقتًا (${retailStaging.length})</label>
+        <div class="space-y-2 mb-5">
+            ${retailStaging.map(item => `
+                <div class="flex items-center justify-between bg-white rounded-xl border border-rose-100 px-3 py-2.5">
+                    <div class="min-w-0">
+                        <div class="font-semibold text-sm truncate">${item.productName}</div>
+                        <div class="text-xs text-slate-400">${item.size} — ${Number(item.basePrice).toFixed(2)} جنيه للوحدة</div>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <input type="number" min="1" value="${item.qty}"
+                               onchange="updateRetailStagingQty(${item.id}, this.value)"
+                               class="w-16 text-center border border-rose-200 rounded-lg py-1.5">
+                        <button onclick="removeRetailStagingItem(${item.id})" class="text-red-500 hover:text-red-700 text-xl">🗑️</button>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+window.updateRetailStagingQty = function(id, newQty) {
+    const qty = parseInt(newQty) || 1;
+    const item = retailStaging.find(i => i.id === id);
+    if (!item) return;
+    item.qty = qty < 1 ? 1 : qty;
+    renderRetailStaging();
+};
+
+window.removeRetailStagingItem = function(id) {
+    retailStaging = retailStaging.filter(i => i.id !== id);
+    renderRetailStaging();
+};
+
+// ==================== إضافة القائمة المؤقتة للفاتورة الكلية (البحر الأحمر / أكوا دلتا / Dr) ====================
+// المبلغ الثابت بيتوزع على كل منتجات القائمة المؤقتة حسب نصيب كل واحد، مش كل منتج ياخد نفس القيمة
+function commitRetailStagingToInvoice() {
+    if (!PERCENT_COMPANIES.includes(retailSelectedCompany)) {
+        return alert('❌ اختر شركة من (البحر الأحمر / أكوا دلتا / Dr) الأول');
+    }
+
+    if (retailStaging.length === 0) {
+        return alert('❌ لسه معملتش إضافة منتجات للقائمة المؤقتة');
+    }
+
+    const typeSelect = document.getElementById('retail-invoice-adjust-type');
+    const valueInput = document.getElementById('retail-invoice-adjust-value');
+    const type = typeSelect ? typeSelect.value : 'percent';
+    const value = valueInput ? (parseFloat(valueInput.value) || 0) : 0;
+
+    if (type === 'percent') {
+        // كل منتج بياخد نفس النسبة من سعره الأصلي
+        retailStaging.forEach(item => {
+            const newPrice = Math.max(0, item.basePrice * (1 + value / 100));
+            retailInvoice.push({
+                id: Date.now() + Math.floor(Math.random() * 1000),
+                productName: item.productName,
+                size: item.size,
+                basePrice: item.basePrice,
+                price: newPrice,
+                qty: item.qty,
+                subtotal: newPrice * item.qty,
+                company: retailSelectedCompany,
+                isPercentGroup: true,
+                adjustType: type,
+                adjustValue: value
+            });
+        });
+    } else {
+        // المبلغ الثابت: بيتوزع على كل منتجات القائمة المؤقتة، كل واحد على قد نصيبه من إجمالي القيمة الأصلية
+        const totalBase = retailStaging.reduce((sum, item) => sum + (item.basePrice * item.qty), 0);
+
+        retailStaging.forEach(item => {
+            const baseSubtotal = item.basePrice * item.qty;
+            const share = totalBase > 0 ? (baseSubtotal / totalBase) : (1 / retailStaging.length);
+            const addition = value * share;
+            const newSubtotal = Math.max(0, baseSubtotal + addition);
+            const newPrice = item.qty > 0 ? newSubtotal / item.qty : newSubtotal;
+
+            retailInvoice.push({
+                id: Date.now() + Math.floor(Math.random() * 1000),
+                productName: item.productName,
+                size: item.size,
+                basePrice: item.basePrice,
+                price: newPrice,
+                qty: item.qty,
+                subtotal: newSubtotal,
+                company: retailSelectedCompany,
+                isPercentGroup: true,
+                adjustType: type,
+                adjustValue: value
+            });
+        });
+    }
+
+    // تصفير القائمة المؤقتة وحقل القيمة بعد الإضافة
+    retailStaging = [];
+    if (valueInput) valueInput.value = 0;
+
+    renderRetailStaging();
+    renderRetailPercentGroups();
+    updateRetailTotalAndRemaining();
+    showToast('✅ تم إضافة منتجات ' + getCompanyLabel(retailSelectedCompany) + ' للفاتورة', 'success');
+}
+
+// ==================== تعديل مجموعة شركة اتضافت بالفعل (رجوعها للقائمة المؤقتة) ====================
+window.editRetailPercentGroup = function(companyId) {
+    const groupItems = retailInvoice.filter(item => item.company === companyId && item.isPercentGroup);
+    if (groupItems.length === 0) return;
+
+    if (!confirm('هترجع منتجات ' + getCompanyLabel(companyId) + ' للقائمة المؤقتة عشان تعدلها. متابع؟')) return;
+
+    // لو فيه منتجات تانية لسه في القائمة المؤقتة، هتتفقد
+    retailStaging = groupItems.map(item => ({
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        productName: item.productName,
+        size: item.size,
+        basePrice: item.basePrice,
+        qty: item.qty
+    }));
+
+    // شيل المجموعة من الفاتورة الكلية
+    retailInvoice = retailInvoice.filter(item => !(item.company === companyId && item.isPercentGroup));
+
+    // فعّل نفس الشركة واعرض القائمة المؤقتة
+    retailSelectedCompany = companyId;
+    const companySelect = document.getElementById('retail-company-filter');
+    if (companySelect) companySelect.value = companyId;
+
+    const sample = groupItems[0];
+    const typeSelect = document.getElementById('retail-invoice-adjust-type');
+    const valueInput = document.getElementById('retail-invoice-adjust-value');
+    if (typeSelect) typeSelect.value = sample.adjustType || 'percent';
+    if (valueInput) valueInput.value = sample.adjustValue || 0;
+
+    toggleRetailAdjustmentUI();
+    renderRetailStaging();
+    renderRetailTable();
+    renderRetailPercentGroups();
+    updateRetailTotalAndRemaining();
+
+    showToast('✏️ رجعت المنتجات للتعديل — عدّل زي ما تحب وادوس "إضافة للفاتورة" تاني', 'warning');
+};
+
+// ==================== حذف مجموعة شركة بالكامل من الفاتورة الكلية ====================
+window.deleteRetailPercentGroup = function(companyId) {
+    const groupItems = retailInvoice.filter(item => item.company === companyId && item.isPercentGroup);
+    if (groupItems.length === 0) return;
+
+    if (!confirm('هل تريد حذف كل منتجات ' + getCompanyLabel(companyId) + ' من الفاتورة؟')) return;
+
+    retailInvoice = retailInvoice.filter(item => !(item.company === companyId && item.isPercentGroup));
+
+    renderRetailTable();
+    renderRetailPercentGroups();
+    updateRetailTotalAndRemaining();
+    showToast('🗑️ تم حذف منتجات ' + getCompanyLabel(companyId), 'error');
+};
+
 // ==================== Retail - دوال المنتجات ====================
 function handleRetailProductSearch(val) {
     const sizeSelect = document.getElementById('retail-size-select');
@@ -1341,35 +1973,158 @@ function handleRetailProductSearch(val) {
 
 
 
-// ==================== عرض جدول الفاتورة القطاعية ====================
+// ==================== عرض جدول الفاتورة القطاعية (المنتجات العادية فقط) ====================
 function renderRetailTable() {
     const tbody = document.getElementById('retail-invoice-tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
 
-    retailInvoice.forEach((item, index) => {
+    const normalItems = retailInvoice.filter(item => !item.isPercentGroup);
+
+    normalItems.forEach((item) => {
         const row = document.createElement('tr');
         row.className = 'hover:bg-gray-50';
         row.innerHTML = `
             <td class="py-5 px-6 font-medium">${item.productName}</td>
             <td class="py-5 px-6 text-center text-lg">${item.size}</td>
-            <td class="py-5 px-6 text-center">${item.price}</td>
+            <td class="py-5 px-6 text-center no-print text-slate-400">${Number(item.basePrice ?? item.price).toFixed(2)}</td>
+            <td class="py-5 px-6 text-center">${Number(item.price).toFixed(2)}</td>
             <td class="py-5 px-6 text-center text-lg font-medium">${item.qty}</td>
             <td class="py-5 px-6 text-center font-bold">${item.subtotal.toFixed(2)}</td>
             <td class="py-5 px-6 text-center no-print">
-                <button onclick="removeRetailItem(${index})" class="text-red-500 hover:text-red-700 text-3xl">🗑️</button>
+                <button onclick="removeRetailItemById(${item.id})" class="text-red-500 hover:text-red-700 text-3xl">🗑️</button>
             </td>
         `;
         tbody.appendChild(row);
     });
+
+    renderRetailPercentGroups();
 }
 
-// ==================== حذف منتج من الفاتورة القطاعية ====================
-window.removeRetailItem = function(index) {
-    retailInvoice.splice(index, 1);
+// ==================== إعادة حساب مجموعة "مبلغ ثابت" من الأصل (عشان الإضافة تفضل ثابتة دايمًا) ====================
+// بتتنادى كل ما الكمية تتغير أو منتج يتشال من مجموعة شركة، عشان الـ 30 جنيه (مثلاً)
+// تتوزع من جديد على اللي باقي فعلاً، مش تعتمد على سعر قديم متحسوب من الأول
+function recalcFixedGroup(companyId) {
+    const items = retailInvoice.filter(item => item.company === companyId && item.isPercentGroup);
+    if (items.length === 0) return;
+    if (items[0].adjustType !== 'fixed') return; // نوع "نسبة مئوية %" مش محتاج إعادة حساب، كل منتج مستقل
+
+    const value = items[0].adjustValue || 0;
+    const totalBase = items.reduce((sum, it) => sum + (it.basePrice * it.qty), 0);
+
+    items.forEach(item => {
+        const baseSubtotal = item.basePrice * item.qty;
+        const share = totalBase > 0 ? (baseSubtotal / totalBase) : (1 / items.length);
+        const addition = value * share;
+        const newSubtotal = Math.max(0, baseSubtotal + addition);
+        item.price = item.qty > 0 ? newSubtotal / item.qty : newSubtotal;
+        item.subtotal = newSubtotal;
+    });
+}
+
+// ==================== حذف منتج من الفاتورة القطاعية (بالـ id) ====================
+window.removeRetailItemById = function(id) {
+    const removed = retailInvoice.find(item => item.id === id);
+    retailInvoice = retailInvoice.filter(item => item.id !== id);
+
+    if (removed && removed.isPercentGroup) {
+        recalcFixedGroup(removed.company);
+    }
+
     renderRetailTable();
     updateRetailTotalAndRemaining();
 };
+
+// ==================== تعديل كمية منتج داخل مربع شركة (البحر الأحمر / أكوا دلتا / Dr) ====================
+window.updateRetailPercentItemQty = function(id, newQty) {
+    const qty = parseInt(newQty) || 1;
+    const item = retailInvoice.find(i => i.id === id);
+    if (!item) return;
+    item.qty = qty < 1 ? 1 : qty;
+
+    if (item.isPercentGroup && item.adjustType === 'fixed') {
+        recalcFixedGroup(item.company);
+    } else {
+        item.subtotal = item.price * item.qty;
+    }
+
+    renderRetailPercentGroups();
+    updateRetailTotalAndRemaining();
+};
+
+// ==================== عرض مربعات الشركات (البحر الأحمر / أكوا دلتا / Dr) في الفاتورة القطاعية ====================
+function renderRetailPercentGroups() {
+    const container = document.getElementById('retail-percent-groups');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const groupedByCompany = {};
+    retailInvoice.filter(item => item.isPercentGroup).forEach(item => {
+        if (!groupedByCompany[item.company]) groupedByCompany[item.company] = [];
+        groupedByCompany[item.company].push(item);
+    });
+
+    const companyIds = Object.keys(groupedByCompany);
+    if (companyIds.length === 0) return;
+
+    companyIds.forEach(companyId => {
+        const items = groupedByCompany[companyId];
+        const groupTotal = items.reduce((sum, it) => sum + it.subtotal, 0);
+
+        const box = document.createElement('div');
+        box.className = 'card overflow-hidden mb-4 border-rose-100';
+        box.innerHTML = `
+            <div class="px-5 sm:px-6 py-4 bg-rose-50 border-b border-rose-100 flex flex-wrap justify-between items-center gap-2">
+                <h3 class="font-bold text-rose-700">🧴 ${getCompanyLabel(companyId)}</h3>
+                <div class="flex items-center gap-3">
+                    <span class="text-sm text-rose-500 font-semibold">${items.length} منتج</span>
+                    <button onclick="editRetailPercentGroup('${companyId}')" class="text-amber-600 hover:text-amber-700 text-sm font-semibold underline no-print">تعديل</button>
+                    <button onclick="deleteRetailPercentGroup('${companyId}')" class="text-red-600 hover:text-red-700 text-sm font-semibold underline no-print">حذف الكل</button>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full table-modern">
+                    <thead class="bg-rose-50/70">
+                        <tr>
+                            <th class="text-right">المنتج</th>
+                            <th>المقاس</th>
+                            <th class="no-print">السعر الأصلي</th>
+                            <th>السعر</th>
+                            <th>الكمية</th>
+                            <th>الإجمالي</th>
+                            <th class="no-print">حذف</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${items.map(item => `
+                            <tr class="hover:bg-gray-50">
+                                <td class="py-4 px-4 font-medium">${item.productName}</td>
+                                <td class="py-4 px-4 text-center">${item.size}</td>
+                                <td class="py-4 px-4 text-center no-print text-slate-400">${Number(item.basePrice).toFixed(2)}</td>
+                                <td class="py-4 px-4 text-center">${Number(item.price).toFixed(2)}</td>
+                                <td class="py-4 px-4 text-center">
+                                    <input type="number" min="1" value="${item.qty}"
+                                           onchange="updateRetailPercentItemQty(${item.id}, this.value)"
+                                           class="w-16 text-center border border-rose-200 rounded-lg py-1 no-print">
+                                    <span class="hidden print:inline">${item.qty}</span>
+                                </td>
+                                <td class="py-4 px-4 text-center font-bold">${item.subtotal.toFixed(2)}</td>
+                                <td class="py-4 px-4 text-center no-print">
+                                    <button onclick="removeRetailItemById(${item.id})" class="text-red-500 hover:text-red-700 text-2xl">🗑️</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <div class="px-5 sm:px-6 py-3 bg-rose-50 border-t border-rose-100 flex justify-between font-bold text-rose-700">
+                <span>إجمالي ${getCompanyLabel(companyId)}</span>
+                <span>${groupTotal.toFixed(2)} جنيه</span>
+            </div>
+        `;
+        container.appendChild(box);
+    });
+}
 
 // ==================== حساب الدين السابق لعميل قطاعي ====================
 function getRetailCustomerPreviousDebt(customerName, excludeIndex = -1) {
@@ -1525,6 +2280,32 @@ function updateRetailTotalAndRemaining() {
     return { currentTotal, grandTotal, paid, remaining: Math.max(0, remaining), previousDebt };
 }
 
+// ==================== المخزون: خصم/استرجاع الكمية عند حفظ/حذف فاتورة قطاعي ====================
+function findProductVariant(productName, size) {
+    const product = products.find(p => p.name === productName);
+    if (!product || !Array.isArray(product.variants)) return null;
+    return product.variants.find(v => v.size === size) || null;
+}
+
+// sign = -1 خصم من المخزون (عند البيع) / sign = +1 رجّع للمخزون (عند الحذف أو تعديل فاتورة قديمة)
+function adjustStockForItems(items, sign) {
+    let changed = false;
+    (Array.isArray(items) ? items : []).forEach(item => {
+        const variant = findProductVariant(item.productName, item.size);
+        if (!variant) return;
+        const hasStockInfo = variant.stock !== undefined && variant.stock !== null && variant.stock !== '';
+        if (!hasStockInfo) return; // المقاس ده مفيهوش بيانات مخزون أصلاً
+        const currentStock = Number(variant.stock) || 0;
+        const qty = Number(item.qty) || 0;
+        variant.stock = Math.max(0, currentStock + sign * qty);
+        changed = true;
+    });
+    if (changed) {
+        saveProducts();
+        renderProducts();
+    }
+}
+
 function saveRetailInvoice() {
     const customerInput = document.getElementById('retail-customer-name');
     const customer = customerInput ? customerInput.value.trim() : 'عميل غير محدد';
@@ -1543,20 +2324,28 @@ function saveRetailInvoice() {
         date: Date.now()
     };
 
+    // المخزون بينقص بس لما الفاتورة تتحفظ نهائي
     if (editingRetailInvoiceIndex !== null) {
+        // فاتورة بتتعدل: رجّع كمية الفاتورة القديمة الأول، وبعدين انقص كمية الفاتورة الجديدة
+        const oldInvoice = savedRetailInvoices[editingRetailInvoiceIndex];
+        if (oldInvoice) adjustStockForItems(oldInvoice.items, +1);
         savedRetailInvoices[editingRetailInvoiceIndex] = invoice;
     } else {
         savedRetailInvoices.push(invoice);
     }
+    adjustStockForItems(invoice.items, -1);
 
     recalculateAllRetailInvoicesForCustomer(customer);
     saveAllRetailInvoices();
 
     // تصفير الفاتورة
     retailInvoice = [];
+    retailStaging = [];
     editingRetailInvoiceIndex = null;
 
     renderRetailTable();
+    renderRetailStaging();
+    renderRetailPercentGroups();
     updateRetailTotalAndRemaining();
 
     if (customerInput) customerInput.value = '';
@@ -1569,12 +2358,7 @@ function saveRetailInvoice() {
 
     setTimeout(getAllUniqueRetailCustomers, 100);
 
-    // رسالة نجاح
-    const toast = document.createElement('div');
-    toast.className = 'fixed bottom-8 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-8 py-4 rounded-3xl shadow-xl z-50';
-    toast.textContent = '✅ تم حفظ فاتورة القطاعي بنجاح';
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
+    showToast('✅ تم حفظ فاتورة القطاعي بنجاح', 'success');
 }
 
 // ==================== إعادة حساب كل فواتير العميل القطاعي ====================
@@ -1688,6 +2472,7 @@ window.editRetailSavedInvoice = function(index) {
 
     editingRetailInvoiceIndex = index;
     retailInvoice = JSON.parse(JSON.stringify(invoice.items));
+    retailStaging = [];
 
     const customerInput = document.getElementById('retail-customer-name');
     if (customerInput) customerInput.value = invoice.customer;
@@ -1696,24 +2481,23 @@ window.editRetailSavedInvoice = function(index) {
     if (paidInput) paidInput.value = Number(invoice.paid || 0).toFixed(2);
 
     renderRetailTable();
+    renderRetailStaging();
     updateRetailTotalAndRemaining();
     updateRetailInvoiceHeader();
 
     showSection('retail');
 
-    const toast = document.createElement('div');
-    toast.className = 'fixed bottom-8 left-1/2 -translate-x-1/2 bg-amber-600 text-white px-6 py-3 rounded-3xl shadow-xl z-50';
-    toast.textContent = '✏️ جاري تعديل فاتورة القطاعي...';
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2000);
+    showToast('✏️ جاري تعديل فاتورة القطاعي...', 'warning');
 };
 
 window.deleteRetailSavedInvoice = function(index) {
     if (!confirm('هل أنت متأكد من حذف هذه الفاتورة القطاعية؟')) return;
+    const inv = savedRetailInvoices[index];
+    if (inv) adjustStockForItems(inv.items, +1); // رجّع الكمية للمخزون
     savedRetailInvoices.splice(index, 1);
     saveAllRetailInvoices();
     renderRetailInvoices();
-    alert('✅ تم حذف الفاتورة');
+    showToast('🗑️ تم حذف الفاتورة', 'error');
 };
 
 // ==================== طباعة فاتورة قطاعي (نفس شكل التجار) ====================
@@ -1749,13 +2533,13 @@ window.printRetailSavedInvoice = function(index) {
                 .header {
                     text-align: center;
                     margin-bottom: 30px;
-                    border-bottom: 4px solid #10b981;
+                    border-bottom: 4px solid #14B8A6;
                     padding-bottom: 15px;
                 }
                 .shop-name {
                     font-size: 28px;
                     font-weight: bold;
-                    color: #10b981;
+                    color: #14B8A6;
                 }
                 table {
                     width: 100%;
@@ -1768,9 +2552,9 @@ window.printRetailSavedInvoice = function(index) {
                     text-align: center;
                 }
                 th {
-                    background-color: #ecfdf5;
+                    background-color: #F0FDFA;
                     font-weight: 600;
-                    color: #065f46;
+                    color: #0F766E;
                 }
                 .totals {
                     margin-top: 30px;
@@ -1779,7 +2563,7 @@ window.printRetailSavedInvoice = function(index) {
                     gap: 15px;
                 }
                 .total-box {
-                    border: 2px solid #10b981;
+                    border: 2px solid #14B8A6;
                     padding: 15px;
                     text-align: center;
                     border-radius: 8px;
@@ -1791,7 +2575,7 @@ window.printRetailSavedInvoice = function(index) {
                 }
                 .red { color: #dc2626; }
                 .green { color: #16a34a; }
-                .emerald { color: #10b981; }
+                .emerald { color: #14B8A6; }
                 @media print {
                     body { padding: 20px; }
                     button, .no-print { display: none !important; }
@@ -1835,7 +2619,7 @@ window.printRetailSavedInvoice = function(index) {
 
             <div class="totals">
                 <div class="total-box">
-                    <h3 style="color:#10b981;">إجمالي الفاتورة الجديدة</h3>
+                    <h3 style="color:#14B8A6;">إجمالي الفاتورة الجديدة</h3>
                     <div class="amount emerald">${currentTotal.toFixed(2)} جنيه</div>
                 </div>
                 <div class="total-box">
@@ -1852,7 +2636,8 @@ window.printRetailSavedInvoice = function(index) {
 
             <div style="margin-top: 50px; text-align: center; color: #666; font-size: 16px;">
                 شكرًا لتعاملك مع مصطفى الازهرى للادوات الصحية<br>
-                برجاء الاحتفاظ بالفاتورة
+                برجاء الاحتفاظ بالفاتورة <br>
+                للاستفساراتصل على : 01002908735 او 01119032231
             </div>
         </body>
         </html>
@@ -1962,7 +2747,10 @@ async function loadRetailInvoices() {
 function clearRetailInvoice() {
     if (confirm('هل تريد مسح الفاتورة القطاعية؟')) {
         retailInvoice = [];
+        retailStaging = [];
         renderRetailTable();
+        renderRetailStaging();
+        renderRetailPercentGroups();
         updateRetailTotalAndRemaining();
     }
 }
@@ -1983,10 +2771,11 @@ function updateRetailPriceDisplay() {
         retailPriceAdjustment = 0;                    // تصفير التعديل
         const adjustInput = document.getElementById('retail-price-adjust');
         if (adjustInput) adjustInput.value = 0;
+        retailItemAdjustmentConfirmed = false;         // لازم يحط النسبة/المبلغ تاني قبل الإضافة
     }
 }
 
-// تطبيق التعديل تلقائياً عند الكتابة
+// تطبيق التعديل تلقائياً عند الكتابة، وتأكيد إن اليوزر حط القيمة فعلاً قبل الإضافة
 function applyRetailPriceAdjustment() {
     const typeSelect = document.getElementById('retail-price-type');
     const valueInput = document.getElementById('retail-price-adjust');
@@ -1995,6 +2784,7 @@ function applyRetailPriceAdjustment() {
 
     retailAdjustmentType = typeSelect.value;
     retailPriceAdjustment = parseFloat(valueInput.value) || 0;
+    retailItemAdjustmentConfirmed = true;
 }
 
 // ==================== إضافة منتج لفاتورة القطاعي (النسخة المحدثة) ====================
@@ -2014,13 +2804,34 @@ function addToRetailInvoice() {
     const variant = product.variants.find(v => v.size === size);
     if (!variant) return alert('❌ المقاس غير موجود');
 
-    // التحقق من وجود تعديل
-    if (retailPriceAdjustment === 0) {
-        return alert('❌ اضف النسبه أو المبلغ للقطاعي أولاً');
+    const isPercentCompany = PERCENT_COMPANIES.includes(retailSelectedCompany);
+
+    if (isPercentCompany) {
+        // الشركات الخاصة (البحر الأحمر / أكوا دلتا / Dr): المنتج بيدخل قائمة مؤقتة من غير أي تعديل سعر هنا
+        // النسبة أو المبلغ بيتحطوا لاحقًا عند الضغط على "إضافة للفاتورة"
+        retailStaging.push({
+            id: Date.now() + Math.floor(Math.random() * 1000),
+            productName: product.name,
+            size: size,
+            basePrice: variant.price,
+            qty: qty
+        });
+
+        renderRetailStaging();
+
+        // تصفير الكمية بس
+        if (qtyInput) qtyInput.value = 1;
+
+        console.log(`تم إضافة ${product.name} للقائمة المؤقتة`);
+        return;
+    }
+
+    // === باقي الشركات: لازم اليوزر يحط نسبة الزيادة أو النقصان الأول قبل ما يضيف المنتج ===
+    if (!retailItemAdjustmentConfirmed) {
+        return alert('⚠️ لازم تحط نسبة الزيادة أو النقصان الأول (حتى لو صفر) قبل ما تضيف المنتج');
     }
 
     let finalPrice = variant.price;
-
     if (retailAdjustmentType === 'percent') {
         finalPrice = variant.price * (1 + retailPriceAdjustment / 100);
     } else {
@@ -2030,9 +2841,10 @@ function addToRetailInvoice() {
     finalPrice = Math.max(0, finalPrice);   // منع السعر السالب
 
     retailInvoice.push({
-        id: Date.now(),
+        id: Date.now() + Math.floor(Math.random() * 1000),
         productName: product.name,
         size: size,
+        basePrice: variant.price,
         price: finalPrice,
         qty: qty,
         subtotal: finalPrice * qty
@@ -2044,8 +2856,9 @@ function addToRetailInvoice() {
     // تصفير الكمية
     if (qtyInput) qtyInput.value = 1;
 
-    // تصفير التعديل بعد الإضافة
+    // تصفير التعديل بعد الإضافة، ولازم يتحط تاني قبل المنتج الجاي
     retailPriceAdjustment = 0;
+    retailItemAdjustmentConfirmed = false;
     const adjustInput = document.getElementById('retail-price-adjust');
     if (adjustInput) adjustInput.value = 0;
 
@@ -2061,4 +2874,91 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-window.onload = startApp;
+// ==================== نظام تسجيل الدخول (Firebase Authentication) ====================
+// ملاحظة أمان: تسجيل الدخول هنا للعرض فقط (إخفاء/إظهار الواجهة).
+// الحماية الحقيقية للبيانات تتم عبر Firestore Security Rules التي تتحقق
+// من request.auth != null على مستوى السيرفر، وليس عبر هذا الكود.
+let appHasStarted = false;
+
+function showAppScreen() {
+    const loginScreen = document.getElementById('login-screen');
+    const appRoot = document.getElementById('app-root');
+    if (loginScreen) loginScreen.classList.add('hidden');
+    if (appRoot) appRoot.classList.remove('hidden');
+}
+
+function showLoginScreen() {
+    const loginScreen = document.getElementById('login-screen');
+    const appRoot = document.getElementById('app-root');
+    if (appRoot) appRoot.classList.add('hidden');
+    if (loginScreen) loginScreen.classList.remove('hidden');
+    appHasStarted = false; // يسمح بإعادة تحميل بيانات المستخدم التالي عند تسجيل دخول جديد
+}
+
+function setLoginError(message) {
+    const el = document.getElementById('login-error');
+    if (!el) return;
+    if (!message) {
+        el.classList.add('hidden');
+        el.textContent = '';
+    } else {
+        el.textContent = message;
+        el.classList.remove('hidden');
+    }
+}
+
+function translateAuthError(code) {
+    const map = {
+        'auth/invalid-email': 'البريد الإلكتروني غير صحيح.',
+        'auth/user-disabled': 'هذا الحساب معطل.',
+        'auth/user-not-found': 'بيانات الدخول غير صحيحة.',
+        'auth/wrong-password': 'بيانات الدخول غير صحيحة.',
+        'auth/invalid-credential': 'بيانات الدخول غير صحيحة.',
+        'auth/too-many-requests': 'محاولات كثيرة جدًا، حاول لاحقًا.',
+        'auth/network-request-failed': 'تحقق من الاتصال بالإنترنت.'
+    };
+    return map[code] || 'حدث خطأ أثناء تسجيل الدخول، حاول مرة أخرى.';
+}
+
+function setupLoginForm() {
+    const form = document.getElementById('login-form');
+    if (!form) return;
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        setLoginError('');
+        const email = document.getElementById('login-email').value.trim();
+        const password = document.getElementById('login-password').value;
+        const submitBtn = document.getElementById('login-submit-btn');
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'جاري الدخول...'; }
+        try {
+            await firebase.auth().signInWithEmailAndPassword(email, password);
+            // onAuthStateChanged هو اللي هيتكفل بإظهار التطبيق
+        } catch (err) {
+            console.error('خطأ تسجيل الدخول:', err);
+            setLoginError(translateAuthError(err.code));
+        } finally {
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'تسجيل الدخول'; }
+        }
+    });
+}
+
+function logoutUser() {
+    firebase.auth().signOut().catch((err) => console.error('خطأ تسجيل الخروج:', err));
+}
+
+function initAuth() {
+    setupLoginForm();
+    firebase.auth().onAuthStateChanged((user) => {
+        if (user) {
+            showAppScreen();
+            if (!appHasStarted) {
+                appHasStarted = true;
+                startApp();
+            }
+        } else {
+            showLoginScreen();
+        }
+    });
+}
+
+window.onload = initAuth;

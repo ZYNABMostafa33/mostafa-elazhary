@@ -5,17 +5,179 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>مصطفى الازهرى - نظام المنتجات والفواتير</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
-    <style>
-        body { 
-            font-family: 'Cairo', sans-serif; 
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Cairo', 'sans-serif'] },
+                    colors: {
+                        // Primary — #1E3A5F
+                        brand: {
+                            50: '#F4F5F7', 100: '#E4E7EC', 200: '#C4CCD5', 300: '#A0ACBC',
+                            400: '#78899F', 500: '#4B617F', 600: '#1E3A5F', 700: '#182E4C',
+                            800: '#13253D', 900: '#0F1D30'
+                        },
+                        // Secondary — #2563EB
+                        secondary: {
+                            50: '#EFF4FE', 100: '#DBE6FC', 200: '#B4CBF9', 300: '#83A8F4',
+                            400: '#4D7CEE', 500: '#2563EB', 600: '#1D4FBE', 700: '#173E93',
+                            800: '#122F70', 900: '#0E2456'
+                        },
+                        // Accent — #14B8A6 (replaces the previous rose/pink retail theme)
+                        rose: {
+                            50: '#F0FDFA', 100: '#CCFBF1', 200: '#99F6E4', 300: '#5EEAD4',
+                            400: '#2DD4BF', 500: '#14B8A6', 600: '#0D9488', 700: '#0F766E',
+                            800: '#115E59', 900: '#134E4A'
+                        },
+                        // Success — #16A34A
+                        emerald: {
+                            50: '#F0FDF4', 100: '#DCFCE7', 200: '#BBF7D0', 300: '#86EFAC',
+                            400: '#4ADE80', 500: '#22C55E', 600: '#16A34A', 700: '#15803D',
+                            800: '#166534', 900: '#14532D'
+                        }
+                        // slate (Background/Cards/Border/Text), amber (Warning #F59E0B) and red
+                        // (Error #DC2626) are no longer overridden here — Tailwind's built-in
+                        // defaults already match the requested palette exactly:
+                        // slate-100 = #F1F5F9 (Background), slate-300 = #CBD5E1 (Border),
+                        // slate-900 = #0F172A (Text), amber-500 = #F59E0B, red-600 = #DC2626
+                    },
+                    boxShadow: {
+                        'soft': '0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px 0 rgb(15 23 42 / 0.06)',
+                        'card': '0 1px 3px 0 rgb(15 23 42 / 0.06), 0 4px 12px -2px rgb(15 23 42 / 0.06)',
+                        'lifted': '0 8px 24px -6px rgb(15 23 42 / 0.12)'
+                    }
+                }
+            }
+        };
+    </script>
+
+    <!-- ==================== نظام التصميم الموحد (Design System) ==================== -->
+    <style type="text/tailwindcss">
+        :root {
+            --brand: #1E3A5F;
+            --brand-dark: #182E4C;
+            --ink: #0F172A;
+            --surface: #FFFFFF;
+            --bg: #F1F5F9;
+            --accent: #14B8A6;
+            --secondary: #2563EB;
+            --border-c: #CBD5E1;
+            --success: #16A34A;
+            --error: #DC2626;
+            --warning: #F59E0B;
         }
-        .modal { 
-            animation: fadeIn 0.3s ease; 
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: 'Cairo', sans-serif;
+            background: var(--bg);
+            color: var(--ink);
+            font-size: 15px;
+            line-height: 1.65;
+            -webkit-font-smoothing: antialiased;
         }
-        @keyframes fadeIn { 
-            from { opacity: 0; transform: scale(0.95); } 
-            to { opacity: 1; transform: scale(1); } 
+
+        h1, h2, h3, h4 { letter-spacing: -0.01em; }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        button, input, select { -webkit-tap-highlight-color: transparent; }
+        button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+            outline: 2px solid var(--brand);
+            outline-offset: 2px;
+        }
+
+        /* ---------- Buttons ---------- */
+        .btn {
+            @apply inline-flex items-center justify-center gap-2 rounded-xl font-semibold text-sm sm:text-base px-5 py-3 transition-all duration-150 select-none active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none disabled:active:scale-100;
+        }
+        .btn-primary { @apply btn bg-brand-600 text-white shadow-soft hover:bg-brand-700; }
+        .btn-secondary { @apply btn bg-white text-slate-700 border border-slate-300 hover:bg-slate-50; }
+        .btn-success { @apply btn bg-emerald-600 text-white shadow-soft hover:bg-emerald-700; }
+        .btn-warning { @apply btn bg-amber-500 text-white shadow-soft hover:bg-amber-600; }
+        .btn-danger  { @apply btn bg-red-50 text-red-700 hover:bg-red-100; }
+        .btn-ghost   { @apply btn bg-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-700; }
+        .btn-rose    { @apply btn bg-rose-600 text-white shadow-soft hover:bg-rose-700; }
+
+        /* ---------- Surfaces ---------- */
+        .card { @apply bg-white rounded-2xl border border-slate-200/80 shadow-soft; }
+        .card-pad { @apply card p-4 sm:p-6; }
+
+        /* ---------- Form elements ---------- */
+        .field-label { @apply block text-sm font-semibold text-slate-600 mb-2; }
+        .input-base {
+            @apply w-full px-4 py-3 rounded-xl border border-slate-300 bg-white text-[15px] text-slate-800
+                   placeholder:text-slate-400 outline-none transition-colors
+                   focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10;
+        }
+        select.input-base { @apply appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22%2394a3b8%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20d%3D%22M5.23%207.21a.75.75%200%20011.06.02L10%2011.168l3.71-3.938a.75.75%200%20111.08%201.04l-4.25%204.5a.75.75%200%2001-1.08%200l-4.25-4.5a.75.75%200%2001.02-1.06z%22%20clip-rule%3D%22evenodd%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[left_0.9rem_center] pl-9; }
+
+        /* ---------- Badges / chips ---------- */
+        .badge { @apply inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold; }
+        .chip {
+            @apply inline-flex items-center px-4 py-2 rounded-full text-sm font-medium border border-slate-300 bg-white text-slate-600
+                   hover:border-brand-400 hover:text-brand-700 transition-colors cursor-pointer whitespace-nowrap;
+        }
+        .chip.chip-active { @apply bg-brand-600 border-brand-600 text-white hover:text-white; }
+        .chip-rose { @apply chip; }
+        .chip-rose.chip-active { @apply bg-rose-600 border-rose-600 text-white; }
+
+        /* ---------- Tables ---------- */
+        .table-modern { @apply w-full text-right border-collapse; }
+        .table-modern thead th { @apply px-4 py-3 text-xs sm:text-sm font-bold text-slate-500 uppercase tracking-wide bg-slate-50; }
+        .table-modern tbody tr { @apply border-b border-slate-100 hover:bg-slate-50/70 transition-colors; }
+        .table-modern tbody td { @apply px-4 py-3 text-slate-700; }
+
+        /* ---------- Nav tabs (JS toggles: border-b-4 border-blue-600 text-blue-600 / border-green-600 text-green-600) ---------- */
+        .nav-tab {
+            @apply flex-1 min-w-[120px] py-3.5 sm:py-4 px-3 text-center font-bold text-sm sm:text-base
+                   border-b-[3px] border-transparent text-slate-400 whitespace-nowrap transition-all duration-150
+                   hover:text-slate-600 hover:bg-slate-50 flex items-center justify-center gap-2;
+        }
+
+        /* ---------- Section heading ---------- */
+        .section-title { @apply text-xl sm:text-2xl font-extrabold text-slate-900; }
+        .section-sub { @apply text-sm text-slate-400 mt-1; }
+
+        /* ---------- Stat card ---------- */
+        .stat-card { @apply card-pad flex items-center gap-4; }
+        .stat-icon { @apply w-11 h-11 rounded-xl flex items-center justify-center text-xl shrink-0; }
+
+        /* ---------- Empty state ---------- */
+        .empty-state { @apply flex flex-col items-center justify-center text-center py-14 px-6 text-slate-400; }
+
+        html, body { scrollbar-gutter: stable; }
+
+        .modal {
+            animation: fadeIn 0.22s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.97) translateY(6px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .modal-panel {
+            max-height: 92vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .modal-body-scroll {
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .nav-scroll {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+        }
+        .nav-scroll::-webkit-scrollbar { display: none; }
+        @media (max-width: 400px) {
+            h1 { font-size: 1.1rem !important; }
         }
         @media print {
             .no-print { display: none !important; }
@@ -25,568 +187,656 @@
         }
     </style>
 </head>
-<body class="bg-gray-50 text-gray-800">
+<body class="bg-slate-100 text-slate-900">
 
-<div class="max-w-5xl mx-auto min-h-screen flex flex-col p-4">
+<!-- ==================== شاشة تسجيل الدخول ==================== -->
+<div id="login-screen" class="min-h-screen flex items-center justify-center px-4 py-8">
+    <div class="w-full max-w-sm">
+        <div class="text-center mb-6">
+            <div class="w-14 h-14 mx-auto rounded-2xl bg-brand-600 text-white flex items-center justify-center text-2xl font-extrabold shadow-soft mb-3">م</div>
+            <h1 class="text-xl font-extrabold text-slate-900">مصطفى الازهرى للادوات الصحية</h1>
+            <p class="text-sm text-slate-400 mt-1">سجّل الدخول للوصول إلى النظام</p>
+        </div>
+        <form id="login-form" class="card-pad space-y-4">
+            <div>
+                <label class="field-label">البريد الإلكتروني</label>
+                <input id="login-email" type="email" required autocomplete="username" class="input-base" placeholder="[email protected]">
+            </div>
+            <div>
+                <label class="field-label">كلمة المرور</label>
+                <input id="login-password" type="password" required autocomplete="current-password" class="input-base" placeholder="••••••••">
+            </div>
+            <div id="login-error" class="hidden text-sm font-semibold text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3"></div>
+            <button id="login-submit-btn" type="submit" class="btn-primary w-full">
+                تسجيل الدخول
+            </button>
+        </form>
+    </div>
+</div>
+
+<div id="app-root" class="hidden max-w-3xl sm:max-w-4xl lg:max-w-6xl mx-auto min-h-screen flex flex-col px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
 
     <!-- Header -->
-    <header class="bg-white shadow-sm sticky top-0 z-50">
-        <div class="px-6 py-4 flex items-center justify-between">
-            <h1 id="go-top" class="text-2xl font-bold text-blue-700 cursor-pointer">مصطفى الازهرى للادوات الصحية</h1>
-            
+    <header class="bg-white/90 backdrop-blur shadow-soft sticky top-0 z-50 rounded-2xl mb-3 border border-slate-200/70">
+        <div class="px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-3">
+            <div class="min-w-0 flex items-center gap-3">
+                <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-brand-600 text-white flex items-center justify-center text-lg sm:text-xl font-extrabold shrink-0 shadow-soft">م</div>
+                <div class="min-w-0">
+                    <h1 id="go-top" class="text-base sm:text-2xl font-extrabold text-slate-900 cursor-pointer truncate leading-tight">مصطفى الازهرى للادوات الصحية</h1>
+                    <p class="text-xs sm:text-sm text-slate-400 mt-0.5 hidden sm:block">نظام إدارة المنتجات والفواتير</p>
+                </div>
+            </div>
+            <button id="logout-btn" onclick="logoutUser()" class="btn-ghost !px-3 sm:!px-4 shrink-0" title="تسجيل الخروج">
+                <span>🚪</span><span class="hidden sm:inline">خروج</span>
+            </button>
         </div>
     </header>
 
     <!-- Navigation -->
-    <nav class="bg-white border-b shadow-sm">
-        <div class="flex">
-            <button onclick="showSection('products')" 
-                    id="btn-products" 
-                    class="flex-1 py-4 text-center font-semibold border-b-4 border-blue-600 text-blue-600">
-                🛍️ منتجاتنا
+    <nav class="bg-white border border-slate-200/70 shadow-soft rounded-2xl mb-4 overflow-hidden">
+        <div class="flex nav-scroll">
+            <button onclick="showSection('products')"
+                    id="btn-products"
+                    class="nav-tab border-b-4 border-blue-600 text-blue-600">
+                <span>🛍️</span><span>منتجاتنا</span>
             </button>
-            <button onclick="showSection('invoice')" 
-                    id="btn-invoice" 
-                    class="flex-1 py-4 text-center font-semibold border-b-4 border-transparent hover:border-blue-500">
-                📝 فواتير التجار
+            <button onclick="showSection('invoice')"
+                    id="btn-invoice"
+                    class="nav-tab">
+                <span>📝</span><span>فواتير التجار</span>
             </button>
             <button onclick="showSection('retail')"
-                id="btn-retail" 
-                class="flex-1 py-4 text-center font-semibold border-b-4 border-transparent hover:border-green-500 text-green-600">
-            🧾 فواتير قطاعي
-        </button>
+                id="btn-retail"
+                class="nav-tab">
+                <span>🧾</span><span>فواتير قطاعي</span>
+            </button>
         </div>
     </nav>
 
     <!-- Products Section -->
-    <div id="products-section" class="flex-1 p-4 overflow-auto">
-        <!-- الصف الأول: الأزرار -->
-         <div class="flex gap-4 mb-4">
-    
-    <button onclick="openAddProductModal()" 
-            class="flex-1 bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 transition font-semibold shadow">
-        + إضافة منتج
-    </button>
-    
-    <button onclick="openBulkPriceModal()"
-            class="flex-1 bg-amber-600 text-white py-3 rounded-xl hover:bg-amber-700 transition font-semibold shadow">
-        ✏️ تعديل الأسعار
-    </button>
+    <div id="products-section" class="flex-1 overflow-auto">
 
-</div>
+        <!-- إحصائيات سريعة -->
+        <div class="grid grid-cols-2 gap-3 sm:gap-4 mb-4">
+            <div class="stat-card">
+                <div class="stat-icon bg-brand-50 text-brand-600">📦</div>
+                <div class="min-w-0">
+                    <div class="text-xs sm:text-sm text-slate-400 font-medium">إجمالي المنتجات</div>
+                    <div id="stat-products-count" class="text-xl sm:text-2xl font-extrabold text-slate-900">0</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon bg-emerald-50 text-emerald-600">📏</div>
+                <div class="min-w-0">
+                    <div class="text-xs sm:text-sm text-slate-400 font-medium">إجمالي المقاسات</div>
+                    <div id="stat-variants-count" class="text-xl sm:text-2xl font-extrabold text-slate-900">0</div>
+                </div>
+            </div>
+        </div>
 
-<!-- الصف الثاني: العنوان + السيرش -->
-<div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
-    
-    <h2 class="text-2xl font-bold">قائمة المنتجات</h2>
-    
-    <input id="product-search-box"
-           type="text"
-           placeholder="🔍 ابحث عن منتج..."
-           class="w-full md:w-80 px-4 py-3 rounded-xl border focus:border-blue-500 outline-none">
-</div>
+        <!-- تحذير الكمية القليلة -->
+        <div id="low-stock-alert" class="hidden mb-4">
+            <button onclick="toggleLowStockPanel()" type="button"
+                    class="w-full bg-red-50 border-2 border-red-200 text-red-700 rounded-2xl px-4 sm:px-5 py-3.5 flex items-center justify-between font-bold hover:bg-red-100 transition-colors">
+                <span class="flex items-center gap-2">⚠️ <span id="low-stock-count">0</span> مقاس وصل لحد التنبيه أو أقل</span>
+                <span class="text-sm">عرض التفاصيل ▾</span>
+            </button>
+            <div id="low-stock-panel" class="hidden mt-2 bg-white border border-red-100 rounded-2xl p-3 sm:p-4 space-y-2 max-h-72 overflow-auto"></div>
+        </div>
 
+        <!-- شريط الأدوات -->
+        <div class="card-pad mb-4">
+            <div class="flex flex-col sm:flex-row gap-3 mb-5">
+                <button onclick="openAddProductModal()" class="btn-primary flex-1">
+                    <span>+</span><span>إضافة منتج</span>
+                </button>
+                <button onclick="openBulkPriceModal()" class="btn-warning flex-1">
+                    <span>✏️</span><span>تعديل الأسعار</span>
+                </button>
+            </div>
 
-    <div id="products-list" class="space-y-6"></div>
+            <div class="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3 mb-4">
+                <h2 class="section-title">قائمة المنتجات</h2>
+                <div class="relative w-full md:w-80">
+                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">🔍</span>
+                    <input id="product-search-box"
+                           type="text"
+                           placeholder="ابحث عن منتج..."
+                           class="input-base pr-11">
+                </div>
+            </div>
+
+            <!-- تصفية حسب الشركة -->
+            <div>
+                <div class="text-xs font-semibold text-slate-400 mb-2">تصفية حسب الشركة</div>
+                <div id="products-company-filter" class="flex flex-wrap gap-2 nav-scroll"></div>
+            </div>
+        </div>
+
+        <div id="products-list" class="space-y-5"></div>
     </div>
 
     <!-- Invoice Section -->
-    <div id="invoice-section" class="flex-1 p-4 overflow-auto hidden">
+    <div id="invoice-section" class="flex-1 overflow-auto hidden">
 
         <!-- بيانات الفاتورة -->
-        <div class="bg-white rounded-2xl shadow p-6 mb-6">
+        <div class="card-pad mb-4">
             <div class="mb-6">
-                <label class="block text-sm font-semibold mb-2">اسم التاجر</label>
-                <input 
-    type="text" 
-    id="customer-name" 
-    list="customers-datalist"
-    placeholder="اسم التاجر"
-    class="w-full px-4 py-3 rounded-xl border focus:border-blue-500 outline-none" 
-    oninput="updateInvoiceHeader()">
-<datalist id="customers-datalist"></datalist>
+                <label class="field-label">اسم التاجر</label>
+                <input
+                    type="text"
+                    id="customer-name"
+                    list="customers-datalist"
+                    placeholder="اسم التاجر"
+                    class="input-base"
+                    oninput="updateInvoiceHeader()">
+                <datalist id="customers-datalist"></datalist>
             </div>
 
-            <!-- اختيار المنتج -->
-            <!-- اختيار المنتج + المقاس + الكمية في صف واحد -->
-<div class="grid grid-cols-1 md:grid-cols-12 gap-4 mb-6">
-    
-    <!-- المنتج (يدعم الكتابة + البحث) -->
-    <div class="md:col-span-5">
-        <label class="block text-sm font-semibold mb-2">اختر المنتج</label>
-        <input 
-            type="text" 
-            id="product-search" 
-            list="products-datalist"
-            placeholder="اكتب اسم المنتج..."
-            class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:border-blue-500 outline-none"
-            oninput="handleProductSearch(this.value)">
-        <datalist id="products-datalist"></datalist>
-    </div>
+            <!-- اختيار المنتج + المقاس + الكمية -->
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-4 mb-2">
 
-    <!-- المقاس -->
-    <div class="md:col-span-3">
-        <label class="block text-sm font-semibold mb-2">المقاس</label>
-        <select id="size-select" 
-                onchange="updatePriceDisplay()"
-                class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:border-blue-500 outline-none">
-        </select>
-    </div>
+                <!-- المنتج -->
+                <div class="md:col-span-5">
+                    <label class="field-label">اختر المنتج</label>
+                    <input
+                        type="text"
+                        id="product-search"
+                        list="products-datalist"
+                        placeholder="اكتب اسم المنتج..."
+                        class="input-base"
+                        oninput="handleProductSearch(this.value)">
+                    <datalist id="products-datalist"></datalist>
+                </div>
 
-    <!-- الكمية + زرار أضف -->
-    <div class="md:col-span-4">
-        <label class="block text-sm font-semibold mb-2">الكمية</label>
-        <div class="flex gap-2">
-            <input id="qty-input" 
-                   type="number" 
-                   min="1" 
-                   value="1" 
-                   class="w-full px-4 py-3 border border-gray-300 rounded-xl text-center focus:border-blue-500 outline-none">
-            <button onclick="addToInvoice()" 
-                    class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl transition font-medium">
-                أضف
-            </button>
+                <!-- المقاس -->
+                <div class="md:col-span-3">
+                    <label class="field-label">المقاس</label>
+                    <select id="size-select"
+                            onchange="updatePriceDisplay()"
+                            class="input-base">
+                    </select>
+                </div>
+
+                <!-- الكمية + زرار أضف -->
+                <div class="md:col-span-4">
+                    <label class="field-label">الكمية</label>
+                    <div class="flex gap-2">
+                        <input id="qty-input"
+                               type="number"
+                               min="1"
+                               value="1"
+                               class="input-base text-center">
+                        <button onclick="addToInvoice()" class="btn-success shrink-0">
+                            أضف
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="text-sm text-slate-400 mb-2">
+                السعر الحالي: <span id="price-display" class="font-bold text-brand-700">0</span> جنيه
+            </div>
         </div>
-    </div>
-</div>
 
         <!-- جدول الفاتورة الحالية -->
-        <div class="bg-white rounded-2xl shadow overflow-hidden mb-6">
-            <div class="px-6 py-4 bg-gray-100 flex justify-between items-center">
-                <h3 class="font-bold">تفاصيل الفاتورة الحالية</h3>
-                <button onclick="clearInvoice()" class="text-red-500 hover:text-red-600 transition">مسح الكل</button>
+        <div class="card overflow-hidden mb-4">
+            <div class="px-5 sm:px-6 py-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                <h3 class="font-bold text-slate-800">تفاصيل الفاتورة الحالية</h3>
+                <button onclick="clearInvoice()" class="text-red-500 hover:text-red-600 transition text-sm font-semibold">مسح الكل</button>
             </div>
-            
-            <div class="p-6 border-b">
-                <div class="flex justify-between text-sm">
-                    <div>التاجر: <span id="invoice-customer" class="font-bold"></span></div>
-                    <div>التاريخ: <span id="invoice-date"></span></div>
+
+            <div class="p-5 sm:p-6 border-b border-slate-100">
+                <div class="flex justify-between text-sm flex-wrap gap-2">
+                    <div>التاجر: <span id="invoice-customer" class="font-bold text-slate-800"></span></div>
+                    <div>التاريخ: <span id="invoice-date" class="text-slate-500"></span></div>
                 </div>
             </div>
             <div class="overflow-x-auto">
-    <table class="min-w-[600px] w-full">
-        <thead class="bg-gray-100">
-            <tr>
-                <th class="py-3 px-4 text-right">المنتج</th>
-                <th class="py-3 px-4">المقاس</th>
-                <th class="py-3 px-4">السعر</th>
-                <th class="py-3 px-4">الكمية</th>
-                <th class="py-3 px-4">الإجمالي</th>
-                <th class="py-3 px-4 no-print">حذف</th>
-            </tr>
-        </thead>
-        <tbody id="invoice-tbody"></tbody>
-    </table>
-</div>
+                <table class="min-w-[600px] table-modern">
+                    <thead>
+                        <tr>
+                            <th class="text-right">المنتج</th>
+                            <th>المقاس</th>
+                            <th>السعر</th>
+                            <th>الكمية</th>
+                            <th>الإجمالي</th>
+                            <th class="no-print">حذف</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invoice-tbody"></tbody>
+                </table>
+            </div>
 
-            <div class="p-6 bg-blue-50 text-xl font-bold flex justify-between">
+            <div class="p-5 sm:p-6 bg-brand-50 text-lg sm:text-xl font-bold flex justify-between text-brand-800">
                 <span>الإجمالي الكلي</span>
                 <span id="total-display">0 جنيه</span>
             </div>
         </div>
-        <!-- === المبالغ النهائية تحت الجدول === -->
-<div class="bg-white rounded-2xl shadow p-6 mt-6">
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
-        <!-- المبلغ المدفوع -->
-        <div>
-            <label class="block text-sm font-semibold mb-2 text-gray-700">المبلغ المدفوع</label>
-            <div class="relative">
-                <input id="paid-input" 
-                       type="number" 
-                       min="0" 
-                       value="0"
-                       class="w-full px-5 py-4 text-2xl font-bold rounded-2xl border focus:border-green-500 outline-none text-center">
-                <span class="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 font-medium">جنيه</span>
+
+        <!-- === المبالغ النهائية === -->
+        <div class="card-pad mb-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+
+                <!-- المبلغ المدفوع -->
+                <div>
+                    <label class="field-label">المبلغ المدفوع</label>
+                    <div class="relative">
+                        <input id="paid-input"
+                               type="number"
+                               min="0"
+                               value="0"
+                               class="input-base text-xl font-bold text-center">
+                        <span class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-medium">جنيه</span>
+                    </div>
+                </div>
+
+                <!-- الإجمالي -->
+                <div>
+                    <label class="field-label">الإجمالي</label>
+                    <input id="total-input"
+                           type="text"
+                           readonly
+                           class="input-base text-xl font-bold text-center bg-brand-50 text-brand-700 border-brand-100">
+                </div>
+
+                <!-- المتبقي -->
+                <div>
+                    <label class="field-label">المتبقي</label>
+                    <input id="remaining-input"
+                           type="text"
+                           readonly
+                           class="input-base text-xl font-bold text-center bg-red-50 text-red-600 border-red-100">
+                </div>
             </div>
         </div>
 
-        <!-- الإجمالي -->
-        <div>
-            <label class="block text-sm font-semibold mb-2 text-gray-700">الإجمالي</label>
-            <input id="total-input" 
-                   type="text" 
-                   readonly
-                   class="w-full px-5 py-4 text-2xl font-bold rounded-2xl border bg-blue-50 text-blue-700 text-center">
-        </div>
-
-        <!-- المتبقي -->
-        <div>
-            <label class="block text-sm font-semibold mb-2 text-gray-700">المتبقي</label>
-            <input id="remaining-input" 
-                   type="text" 
-                   readonly
-                   class="w-full px-5 py-4 text-2xl font-bold rounded-2xl border bg-red-50 text-red-600 text-center">
-        </div>
-    </div>
-</div>
-
-        <button onclick="saveCurrentInvoice()" 
-        class="w-full bg-purple-600 hover:bg-purple-700 text-white py-4 rounded-2xl text-xl font-bold mb-8 transition">
-    حفظ الفاتورة كاملة
-</button>
+        <button onclick="saveCurrentInvoice()" class="btn-primary w-full text-lg py-4 mb-6">
+            حفظ الفاتورة كاملة
+        </button>
 
         <!-- بحث الفواتير السابقة -->
-        <div class="mb-4">
-            <input id="search-customer" 
-                   type="text" 
-                   placeholder="اكتب اسم التاجر للبحث..." 
-                   class="w-full px-4 py-3 rounded-xl border focus:border-blue-500 outline-none"
+        <div class="relative mb-4">
+            <span class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">🔍</span>
+            <input id="search-customer"
+                   type="text"
+                   placeholder="اكتب اسم التاجر للبحث..."
+                   class="input-base pr-11"
                    oninput="filterInvoicesByCustomer()">
         </div>
 
         <!-- قسم الفواتير السابقة -->
-        <div class="bg-white rounded-2xl shadow p-6">
-            <h3 class="font-bold text-lg mb-4">📋 فواتيري السابقة</h3>
-            <div id="saved-invoices-list" class="space-y-4"></div>
-        </div>
-        
-    </div>
-</div>
-
-<!-- ==================== قسم فواتير قطاعي (مستقل - لون أخضر) ==================== -->
-<!-- ==================== قسم فواتير قطاعي (بالألوان الوردية) ==================== -->
-<div id="retail-section" class="flex-1 p-4 overflow-auto hidden max-w-7xl mx-auto">
-
-    <!-- بيانات الفاتورة القطاعية -->
-    <div class="bg-white rounded-3xl shadow-xl p-6 mb-6 border border-[#FFE5EC]">
-        <div class="mb-6">
-    <label class="block text-sm font-semibold mb-2 text-[#FB6F92]">اسم العميل (قطاعي)</label>
-    <div class="flex gap-4">
-        <input 
-            type="text" 
-            id="retail-customer-name" 
-            list="retail-customers-datalist"
-            placeholder="اسم العميل"
-            class="flex-1 px-5 py-4 rounded-2xl border border-[#FFC2D1] focus:border-[#FB6F92] outline-none text-lg"
-            oninput="updateRetailInvoiceHeader()">
-        <div id="retail-customer-balance" 
-             class="px-5 py-4 rounded-2xl text-sm font-medium flex items-center min-w-[180px]">
-        </div>
-    </div>
-    <datalist id="retail-customers-datalist"></datalist>
-</div>
-
-<!-- اختيار المنتج + المقاس + الكمية  (في سطر واحد على الكمبيوتر) -->
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-4 mb-6">
-
-    <!-- المنتج -->
-    <div class="lg:col-span-5 xl:col-span-5">
-        <label class="block text-sm font-semibold mb-2 text-[#FB6F92]">المنتج</label>
-        <input 
-            type="text" 
-            id="retail-product-search" 
-            list="products-datalist"
-            placeholder="اسم المنتج..."
-            class="w-full px-4 py-3 border border-[#FFC2D1] rounded-2xl focus:border-[#FB6F92] outline-none"
-            oninput="handleRetailProductSearch(this.value)">
-    </div>
-
-    <!-- المقاس -->
-    <div class="lg:col-span-3 xl:col-span-3">
-        <label class="block text-sm font-semibold mb-2 text-[#FB6F92]">المقاس</label>
-        <select id="retail-size-select" 
-                onchange="updateRetailPriceDisplay()"
-                class="w-full px-4 py-3 border border-[#FFC2D1] rounded-2xl focus:border-[#FB6F92] outline-none">
-        </select>
-    </div>
-
-    <!-- الكمية + زرار أضف -->
-    <div class="lg:col-span-4 xl:col-span-4">
-        <label class="block text-sm font-semibold mb-2 text-[#FB6F92]">الكمية</label>
-        <div class="flex gap-2">
-            <input id="retail-qty-input" 
-                   type="number" 
-                   min="1" 
-                   value="1" 
-                   class="flex-1 px-4 py-3 border border-[#FFC2D1] rounded-2xl text-center focus:border-[#FB6F92] outline-none">
-            <button onclick="addToRetailInvoice()" 
-                    class="bg-[#FB6F92] hover:bg-[#FF8FAB] text-white px-8 py-3 rounded-2xl font-medium transition flex-shrink-0">
-                أضف
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- تعديل السعر - سطر منفصل على الكمبيوتر -->
-<div class="bg-[#FFF0F5] border border-[#FFB3C6] rounded-3xl p-5 mb-8">
-    <label class="block text-sm font-semibold mb-3 text-[#FB6F92]">تعديل السعر للقطاعي (زيادة أو نقصان)</label>
-    <div class="flex flex-col sm:flex-row gap-4 items-end">
-        <div class="flex-1">
-            <select id="retail-price-type" 
-                    class="w-full px-4 py-3 border border-[#FFB3C6] rounded-2xl focus:border-[#FB6F92] outline-none">
-                <option value="percent">نسبة مئوية %</option>
-                <option value="fixed">مبلغ ثابت (جنيه)</option>
-            </select>
-        </div>
-        <div class="flex-1">
-            <input id="retail-price-adjust" 
-                   type="number" 
-                   step="0.01" 
-                   value="0" 
-                   placeholder="0"
-                   class="w-full px-4 py-3 border border-[#FFB3C6] rounded-2xl text-center focus:border-[#FB6F92] outline-none"
-                   oninput="applyRetailPriceAdjustment()">
-        </div>
-        <small class="text-[#CDB4DB] text-xs sm:text-sm">اكتب الزيادة أو النقصان هنا</small>
-    </div>
-</div>
-
-    </div>
-
-    <!-- جدول الفاتورة -->
-    <div class="bg-[#FFE5EC] rounded-3xl shadow-xl overflow-hidden mb-6 border border-[#FFC2D1]">
-        <div class="px-6 py-5 bg-[#FFB3C6] flex justify-between items-center">
-            <h3 class="font-bold text-lg text-[#FB6F92]">تفاصيل الفاتورة القطاعية الحالية</h3>
-            <button onclick="clearRetailInvoice()" 
-                    class="text-red-600 hover:text-red-700 font-medium">مسح الكل</button>
+        <div class="card-pad">
+            <h3 class="font-bold text-lg mb-4 text-slate-800">📋 فواتيري السابقة</h3>
+            <div id="saved-invoices-list" class="space-y-3"></div>
         </div>
 
-        <div class="overflow-x-auto">
-            <table class="min-w-full">
-                <thead class="bg-[#FFC2D1]">
-                    <tr>
-                        <th class="py-4 px-6 text-right">المنتج</th>
-                        <th class="py-4 px-6">المقاس</th>
-                        <th class="py-4 px-6">السعر</th>
-                        <th class="py-4 px-6">الكمية</th>
-                        <th class="py-4 px-6">الإجمالي</th>
-                        <th class="py-4 px-6 no-print">حذف</th>
-                    </tr>
-                </thead>
-                <tbody id="retail-invoice-tbody" class="bg-white"></tbody>
-            </table>
-        </div>
-
-        <div class="p-6 bg-[#FFE5EC] text-2xl font-bold flex justify-between border-t border-[#FFB3C6]">
-            <span class="text-[#FB6F92]">الإجمالي الكلي</span>
-            <span id="retail-total-display" class="text-[#FB6F92]">0.00 جنيه</span>
-        </div>
     </div>
 
-    <!-- المبالغ النهائية -->
-    <div class="bg-white rounded-3xl shadow-xl p-8 mb-8">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div>
-                <label class="block text-sm font-semibold mb-3 text-[#FF8FAB]">المبلغ المدفوع</label>
-                <input id="retail-paid-input" type="number" min="0" value="0"
-                       class="w-full px-6 py-5 text-3xl font-bold rounded-2xl border-2 border-[#FFB3C6] focus:border-[#FB6F92] text-center">
-            </div>
-            <div>
-                <label class="block text-sm font-semibold mb-3 text-[#FF8FAB]">الإجمالي</label>
-                <input id="retail-total-input" type="text" readonly
-                       class="w-full px-6 py-5 text-3xl font-bold rounded-2xl border-2 border-[#CDB4DB] bg-[#FFE5EC] text-[#FB6F92] text-center">
-            </div>
-            <div>
-                <label class="block text-sm font-semibold mb-3 text-[#FF8FAB]">المتبقي</label>
-                <input id="retail-remaining-input" type="text" readonly
-                       class="w-full px-6 py-5 text-3xl font-bold rounded-2xl border-2 border-[#FB6F92] bg-[#FFE5EC] text-[#FB6F92] text-center">
-            </div>
-        </div>
-    </div>
+    <!-- ==================== قسم فواتير قطاعي ==================== -->
+    <div id="retail-section" class="flex-1 overflow-auto hidden">
 
-    <button id="save-retail-btn"
-            class="w-full bg-[#FB6F92] hover:bg-[#FF8FAB] text-white py-5 rounded-3xl text-2xl font-bold shadow-lg transition-all">
-        حفظ فاتورة قطاعي كاملة
-    </button>
-
-    <!-- باقي الأقسام (البحث والفواتير السابقة) -->
-    <div class="mt-10">
-        <input id="search-retail-customer" type="text" 
-               placeholder="ابحث باسم العميل..." 
-               class="w-full px-5 py-4 rounded-2xl border border-[#FFB3C6] focus:border-[#FB6F92] outline-none"
-               oninput="filterRetailInvoicesByCustomer()">
-    </div>
-
-    <div class="bg-white rounded-3xl shadow-xl p-6 mt-6">
-        <h3 class="font-bold text-xl mb-5 text-[#FB6F92]">📋 فواتير قطاعي السابقة</h3>
-        <div id="saved-retail-invoices-list" class="space-y-4"></div>
-    </div>
-</div>
-
-<!-- مودال إضافة/تعديل منتج -->
-<div id="product-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-    <div class="bg-white rounded-2xl w-full max-w-lg mx-4 overflow-hidden">
-        <div class="p-6 bg-gray-100 flex justify-between items-center">
-            <h3 id="modal-title" class="text-xl font-bold">إضافة منتج جديد</h3>
-            <button onclick="closeModal()" class="text-3xl leading-none hover:text-gray-700">×</button>
-        </div>
-        <div class="p-6">
+        <!-- بيانات الفاتورة القطاعية -->
+        <div class="bg-white rounded-2xl shadow-soft p-4 sm:p-6 mb-4 border border-rose-100">
             <div class="mb-6">
-                <label class="block mb-2 font-medium">اسم المنتج</label>
-                <input id="product-name" 
-                       type="text" 
-                       class="w-full px-4 py-3 border rounded-xl focus:border-blue-500 outline-none">
-            </div>
-            <!-- تصنيف الشركة - الجزء الجديد -->
-<div class="mb-6">
-    <label class="block mb-3 font-medium text-gray-700">تصنيف المنتج (الشركة)</label>
-    <div class="flex flex-col sm:flex-row gap-4">
-
-        <!-- شركة البحر الأحمر -->
-        <label class="flex items-center gap-3 cursor-pointer group">
-            <div class="relative">
-                <input type="checkbox" id="company-redsea" 
-                       class="peer w-6 h-6 accent-blue-600 border-2 border-gray-300 rounded-lg 
-                              focus:ring-2 focus:ring-blue-500 cursor-pointer
-                              appearance-none checked:bg-blue-600 checked:border-blue-600">
-                <span class="absolute inset-0 flex items-center justify-center text-white text-xl font-bold 
-                             opacity-0 peer-checked:opacity-100 pointer-events-none">✓</span>
-            </div>
-            <span class="text-base font-medium text-gray-700 group-hover:text-blue-700">شركة البحر الأحمر</span>
-        </label>
-
-        <!-- شركة أكوا دلتا -->
-        <label class="flex items-center gap-3 cursor-pointer group">
-            <div class="relative">
-                <input type="checkbox" id="company-aquadelta" 
-                       class="peer w-6 h-6 accent-blue-600 border-2 border-gray-300 rounded-lg 
-                              focus:ring-2 focus:ring-blue-500 cursor-pointer
-                              appearance-none checked:bg-blue-600 checked:border-blue-600">
-                <span class="absolute inset-0 flex items-center justify-center text-white text-xl font-bold 
-                             opacity-0 peer-checked:opacity-100 pointer-events-none">✓</span>
-            </div>
-            <span class="text-base font-medium text-gray-700 group-hover:text-blue-600">شركة أكوا دلتا</span>
-        </label>
-
-    </div>
-</div>
-            <div>
-                <div class="flex justify-between items-center mb-3">
-                    <label class="font-medium">المقاسات والأسعار</label>
-                    <button onclick="addVariantRow()" 
-                            class="bg-blue-100 hover:bg-blue-200 px-4 py-2 rounded-xl text-sm transition">
-                        + مقاس جديد
-                    </button>
+                <label class="field-label text-rose-600">اسم العميل (قطاعي)</label>
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <input
+                        type="text"
+                        id="retail-customer-name"
+                        list="retail-customers-datalist"
+                        placeholder="اسم العميل"
+                        class="input-base flex-1 focus:border-rose-500 focus:ring-rose-500/10"
+                        oninput="updateRetailInvoiceHeader()">
+                    <div id="retail-customer-balance"
+                         class="px-5 py-3 rounded-xl text-sm font-medium flex items-center justify-center min-w-[180px] bg-slate-50 text-slate-500">
+                    </div>
                 </div>
-                <div id="variants-container" class="space-y-3 max-h-60 overflow-auto"></div>
+                <datalist id="retail-customers-datalist"></datalist>
             </div>
-        </div>
-        <div class="p-6 bg-gray-100 flex gap-4">
-            <button onclick="closeModal()" 
-                    class="flex-1 py-3 border rounded-xl hover:bg-gray-50 transition">
-                إلغاء
-            </button>
-            <button onclick="saveProduct()" 
-                    class="flex-1 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition">
-                حفظ المنتج
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- مودال تعديل الأسعار جماعي (النسخة البسيطة) -->
-<div id="bulk-price-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-    <div class="bg-white rounded-3xl w-full max-w-md mx-4 overflow-hidden">
-
-        <!-- العنوان -->
-        <div class="p-6 bg-gradient-to-r from-amber-500 to-orange-600 text-white text-center">
-            <h3 class="text-xl font-bold">تعديل الأسعار لشركة</h3>
-        </div>
-
-        <div class="p-6 space-y-6">
 
             <!-- اختيار الشركة -->
-            <div>
-                <label class="block text-sm font-semibold mb-3 text-gray-700">اختر الشركة</label>
-                <div class="grid grid-cols-2 gap-3">
-                    <button onclick="selectCompanyForBulk('redsea')" 
-                            id="btn-redsea"
-                            class="py-5 rounded-2xl border-2 border-gray-300 font-medium text-lg hover:border-amber-500 transition-all">
-                        🌊 البحر الأحمر
-                    </button>
-                    <button onclick="selectCompanyForBulk('aquadelta')" 
-                            id="btn-aquadelta"
-                            class="py-5 rounded-2xl border-2 border-gray-300 font-medium text-lg hover:border-amber-500 transition-all">
-                        💧 أكوا دلتا
-                    </button>
+            <div class="mb-6">
+                <label class="field-label text-rose-600">اختر الشركة</label>
+                <select id="retail-company-filter"
+                        onchange="handleRetailCompanyChange()"
+                        class="input-base focus:border-rose-500 focus:ring-rose-500/10">
+                    <option value="">كل الشركات</option>
+                </select>
+            </div>
+
+            <!-- اختيار المنتج + المقاس + الكمية -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-4 mb-2">
+
+                <!-- المنتج -->
+                <div class="lg:col-span-5 xl:col-span-5">
+                    <label class="field-label text-rose-600">المنتج</label>
+                    <input
+                        type="text"
+                        id="retail-product-search"
+                        list="retail-products-datalist"
+                        placeholder="اسم المنتج..."
+                        class="input-base focus:border-rose-500 focus:ring-rose-500/10"
+                        oninput="handleRetailProductSearch(this.value)">
+                    <datalist id="retail-products-datalist"></datalist>
+                </div>
+
+                <!-- المقاس -->
+                <div class="lg:col-span-3 xl:col-span-3">
+                    <label class="field-label text-rose-600">المقاس</label>
+                    <select id="retail-size-select"
+                            onchange="updateRetailPriceDisplay()"
+                            class="input-base focus:border-rose-500 focus:ring-rose-500/10">
+                    </select>
+                </div>
+
+                <!-- الكمية + زرار أضف -->
+                <div class="lg:col-span-4 xl:col-span-4">
+                    <label class="field-label text-rose-600">الكمية</label>
+                    <div class="flex gap-2">
+                        <input id="retail-qty-input"
+                               type="number"
+                               min="1"
+                               value="1"
+                               class="input-base text-center focus:border-rose-500 focus:ring-rose-500/10">
+                        <button onclick="addToRetailInvoice()" class="btn-rose shrink-0">
+                            أضف
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            <!-- نوع التعديل -->
-            <!-- نوع التعديل -->
-<div>
-    <label class="block text-sm font-semibold mb-3 text-gray-700">نوع التعديل</label>
-    <div class="grid grid-cols-3 gap-3">
-        <button onclick="setBulkEditType('percent')" 
-                id="btn-percent"
-                class="py-4 rounded-2xl border-2 border-gray-300 font-medium transition-all active:bg-amber-100">
-            زيادة نسبة (%)
-        </button>
-        <button onclick="setBulkEditType('minus_percent')" 
-                id="btn-minus-percent"
-                class="py-4 rounded-2xl border-2 border-gray-300 font-medium transition-all active:bg-amber-100">
-            نقصان نسبة (%)
-        </button>
-        <button onclick="setBulkEditType('fixed')" 
-                id="btn-fixed"
-                class="py-4 rounded-2xl border-2 border-gray-300 font-medium transition-all active:bg-amber-100">
-            زيادة ثابتة (جنيه)
-        </button>
-        <button onclick="setBulkEditType('minus_fixed')" 
-                id="btn-minus-fixed"
-                class="py-4 rounded-2xl border-2 border-gray-300 font-medium transition-all active:bg-amber-100 col-span-3">
-            نقصان ثابت (جنيه)
-        </button>
-    </div>
-</div>
-
-            <!-- حقل الإدخال -->
-            <div>
-                <label class="block text-sm font-semibold mb-2 text-gray-700" id="bulk-label">نسبة الزيادة (%)</label>
-                <input id="bulk-value" 
-                       type="number" 
-                       step="0.01" 
-                       min="0"
-                       class="w-full px-6 py-5 text-3xl font-bold text-center border-2 border-gray-300 rounded-2xl focus:border-amber-500 outline-none"
-                       placeholder="0">
+            <!-- تعديل السعر - لكل منتج -->
+            <div id="retail-per-item-adjust-block" class="bg-rose-50 border border-rose-100 rounded-2xl p-4 sm:p-5 mt-6">
+                <label class="block text-sm font-semibold mb-3 text-rose-600">تعديل السعر للقطاعي (زيادة أو نقصان) </label>
+                <div class="flex flex-col sm:flex-row gap-3 items-end">
+                    <div class="flex-1 w-full">
+                        <select id="retail-price-type" onchange="applyRetailPriceAdjustment()" class="input-base focus:border-rose-500 focus:ring-rose-500/10">
+                            <option value="percent">نسبة مئوية %</option>
+                            <option value="fixed">مبلغ ثابت (جنيه)</option>
+                        </select>
+                    </div>
+                    <div class="flex-1 w-full">
+                        <input id="retail-price-adjust"
+                               type="number"
+                               step="0.01"
+                               value="0"
+                               placeholder="0"
+                               class="input-base text-center focus:border-rose-500 focus:ring-rose-500/10"
+                               oninput="applyRetailPriceAdjustment()">
+                    </div>
+            
+                </div>
             </div>
 
         </div>
 
-        <!-- أزرار أسفل المودال -->
-        <div class="p-6 bg-gray-50 border-t flex gap-3">
-            <button onclick="closeBulkPriceModal()" 
-                    class="flex-1 py-4 text-lg border border-gray-300 rounded-2xl font-medium hover:bg-gray-100">
-                إلغاء
-            </button>
-            <button onclick="applyBulkPriceChange()" 
-                    class="flex-1 py-4 text-lg bg-green-600 hover:bg-green-700 text-white rounded-2xl font-medium">
-                تطبيق التعديل
-            </button>
+        <!-- القائمة المؤقتة + تعديل السعر على مستوى الفاتورة كلها -->
+        <div id="retail-invoice-level-adjust" class="hidden bg-rose-50 border border-rose-100 rounded-2xl p-4 sm:p-5 mb-4">
+
+            <div id="retail-staging-container" class="mb-2">
+                <p class="text-sm text-rose-300 mb-4"> اختار منتج</p>
+            </div>
+
+            <label class="block text-sm font-semibold mb-3 text-rose-600">تعديل السعر على المنتجات دي كلها </label>
+            <div class="flex flex-col sm:flex-row gap-3 items-end">
+                <div class="flex-1 w-full">
+                    <select id="retail-invoice-adjust-type" class="input-base focus:border-rose-500 focus:ring-rose-500/10">
+                        <option value="percent">نسبة مئوية %</option>
+                        <option value="fixed">مبلغ ثابت  (جنيه)</option>
+                    </select>
+                </div>
+                <div class="flex-1 w-full">
+                    <input id="retail-invoice-adjust-value"
+                           type="number"
+                           step="0.01"
+                           value="0"
+                           placeholder="0"
+                           class="input-base text-center focus:border-rose-500 focus:ring-rose-500/10">
+                </div>
+                <button onclick="commitRetailStagingToInvoice()" class="btn-rose shrink-0 w-full sm:w-auto">
+                    إضافة للفاتورة
+                </button>
+            </div>
+           
         </div>
 
+        <!-- مربعات الشركات (البحر الأحمر / أكوا دلتا / Dr) -->
+        <div id="retail-percent-groups"></div>
+
+        <!-- جدول الفاتورة -->
+        <div class="card overflow-hidden mb-4 border-rose-100">
+            <div class="px-5 sm:px-6 py-4 bg-rose-50 border-b border-rose-100 flex justify-between items-center">
+                <h3 class="font-bold text-rose-700">تفاصيل الفاتورة القطاعية الحالية</h3>
+                <button onclick="clearRetailInvoice()" class="text-red-600 hover:text-red-700 font-semibold text-sm">مسح الكل</button>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="min-w-full table-modern">
+                    <thead class="bg-rose-50/70">
+                        <tr>
+                            <th class="text-right">المنتج</th>
+                            <th>المقاس</th>
+                            <th class="no-print">السعر الأصلي</th>
+                            <th>السعر</th>
+                            <th>الكمية</th>
+                            <th>الإجمالي</th>
+                            <th class="no-print">حذف</th>
+                        </tr>
+                    </thead>
+                    <tbody id="retail-invoice-tbody"></tbody>
+                </table>
+            </div>
+
+            <div class="p-5 sm:p-6 bg-rose-50 text-lg sm:text-xl font-bold flex justify-between border-t border-rose-100">
+                <span class="text-rose-700">الإجمالي الكلي</span>
+                <span id="retail-total-display" class="text-rose-700">0.00 جنيه</span>
+            </div>
+        </div>
+
+        <!-- المبالغ النهائية -->
+        <div class="card-pad mb-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div>
+                    <label class="field-label text-rose-600">المبلغ المدفوع</label>
+                    <input id="retail-paid-input" type="number" min="0" value="0"
+                           class="input-base text-xl font-bold text-center focus:border-rose-500 focus:ring-rose-500/10">
+                </div>
+                <div>
+                    <label class="field-label text-rose-600">الإجمالي</label>
+                    <input id="retail-total-input" type="text" readonly
+                           class="input-base text-xl font-bold text-center bg-rose-50 text-rose-700 border-rose-100">
+                </div>
+                <div>
+                    <label class="field-label text-rose-600">المتبقي</label>
+                    <input id="retail-remaining-input" type="text" readonly
+                           class="input-base text-xl font-bold text-center bg-rose-50 text-rose-700 border-rose-100">
+                </div>
+            </div>
+        </div>
+
+        <button id="save-retail-btn" class="btn-rose w-full text-lg py-4 mb-6">
+            حفظ فاتورة قطاعي كاملة
+        </button>
+
+        <!-- البحث في الفواتير السابقة -->
+        <div class="relative mb-4">
+            <span class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">🔍</span>
+            <input id="search-retail-customer" type="text"
+                   placeholder="ابحث باسم العميل..."
+                   class="input-base pr-11 focus:border-rose-500 focus:ring-rose-500/10"
+                   oninput="filterRetailInvoicesByCustomer()">
+        </div>
+
+        <div class="card-pad">
+            <h3 class="font-bold text-lg mb-4 text-rose-700">📋 فواتير قطاعي السابقة</h3>
+            <div id="saved-retail-invoices-list" class="space-y-3"></div>
+        </div>
     </div>
+
+    <!-- مودال إضافة/تعديل منتج -->
+    <div id="product-modal" class="hidden fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-3 sm:p-4">
+        <div class="modal modal-panel bg-white rounded-2xl w-full max-w-lg mx-auto shadow-lifted">
+            <div class="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center rounded-t-2xl shrink-0">
+                <h3 id="modal-title" class="text-lg sm:text-xl font-bold text-slate-900">إضافة منتج جديد</h3>
+                <button onclick="closeModal()" class="w-9 h-9 flex items-center justify-center rounded-lg text-2xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition">×</button>
+            </div>
+            <div class="p-4 sm:p-6 modal-body-scroll">
+                <div class="mb-6">
+                    <label class="field-label">اسم المنتج</label>
+                    <input id="product-name"
+                           type="text"
+                           class="input-base">
+                </div>
+                <!-- تصنيف الشركة -->
+                <div class="mb-6">
+                    <label class="field-label">تصنيف المنتج (الشركة)</label>
+                    <div id="product-companies-container" class="flex flex-wrap gap-2 mb-3"></div>
+                    <button type="button" onclick="openCompanyManager()" class="btn-secondary w-full">
+                        🏢 اختيار / إدارة الشركات
+                    </button>
+                </div>
+                <div>
+                    <div class="flex justify-between items-center mb-3">
+                        <label class="font-semibold text-slate-700">المقاسات والأسعار</label>
+                        <button onclick="addVariantRow()" class="btn-secondary !py-2 !px-4 text-sm">
+                            + مقاس جديد
+                        </button>
+                    </div>
+                    <div id="variants-container" class="space-y-3 max-h-60 overflow-auto"></div>
+                </div>
+            </div>
+            <div class="p-4 sm:p-6 bg-slate-50 border-t border-slate-100 flex gap-3 rounded-b-2xl shrink-0">
+                <button onclick="closeModal()" class="btn-secondary flex-1">
+                    إلغاء
+                </button>
+                <button onclick="saveProduct()" class="btn-primary flex-1">
+                    حفظ المنتج
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- مودال إدارة الشركات -->
+    <div id="company-manager-modal" class="hidden fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[60] p-3 sm:p-4">
+        <div class="modal modal-panel bg-white rounded-2xl w-full max-w-md mx-auto shadow-lifted">
+            <div class="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center rounded-t-2xl shrink-0">
+                <h3 class="text-lg sm:text-xl font-bold text-slate-900">إدارة الشركات</h3>
+                <button onclick="closeCompanyManager()" class="w-9 h-9 flex items-center justify-center rounded-lg text-2xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition">×</button>
+            </div>
+            <div class="p-4 sm:p-6 modal-body-scroll">
+                <div id="company-manager-list" class="space-y-2 mb-5"></div>
+
+                <div class="flex gap-2 pt-3 border-t border-slate-100">
+                    <input id="new-company-name" type="text" placeholder="اسم شركة جديدة..."
+                           class="input-base flex-1">
+                    <button onclick="addNewCompanyEntry()" class="btn-primary shrink-0">+ إضافة</button>
+                </div>
+            </div>
+            <div class="p-4 sm:p-6 bg-slate-50 border-t border-slate-100 flex gap-3 rounded-b-2xl shrink-0">
+                <button onclick="closeCompanyManager()" class="btn-primary flex-1">تم</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- مودال تعديل الأسعار جماعي -->
+    <div id="bulk-price-modal" class="hidden fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-3 sm:p-4">
+        <div class="modal modal-panel bg-white rounded-2xl w-full max-w-md mx-auto shadow-lifted">
+
+            <div class="p-5 sm:p-6 bg-amber-500 text-white text-center rounded-t-2xl shrink-0">
+                <h3 class="text-lg sm:text-xl font-bold">تعديل الأسعار لشركة</h3>
+            </div>
+
+            <div class="p-5 sm:p-6 space-y-6 modal-body-scroll">
+
+                <!-- اختيار الشركة -->
+                <div>
+                    <label class="field-label">اختر الشركة</label>
+                    <div id="bulk-companies-container" class="grid grid-cols-2 sm:grid-cols-3 gap-3"></div>
+                </div>
+
+                <!-- نوع التعديل -->
+                <div>
+                    <label class="field-label">نوع التعديل</label>
+                    <div class="grid grid-cols-3 gap-3">
+                        <button onclick="setBulkEditType('percent')"
+                                id="btn-percent"
+                                class="py-4 rounded-xl border-2 border-slate-200 font-medium text-sm text-slate-600 transition-all active:bg-amber-100">
+                            زيادة نسبة (%)
+                        </button>
+                        <button onclick="setBulkEditType('minus_percent')"
+                                id="btn-minus-percent"
+                                class="py-4 rounded-xl border-2 border-slate-200 font-medium text-sm text-slate-600 transition-all active:bg-amber-100">
+                            نقصان نسبة (%)
+                        </button>
+                        <button onclick="setBulkEditType('fixed')"
+                                id="btn-fixed"
+                                class="py-4 rounded-xl border-2 border-slate-200 font-medium text-sm text-slate-600 transition-all active:bg-amber-100">
+                            زيادة ثابتة (جنيه)
+                        </button>
+                        <button onclick="setBulkEditType('minus_fixed')"
+                                id="btn-minus-fixed"
+                                class="py-4 rounded-xl border-2 border-slate-200 font-medium text-sm text-slate-600 transition-all active:bg-amber-100 col-span-3">
+                            نقصان ثابت (جنيه)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- حقل الإدخال -->
+                <div>
+                    <label class="field-label" id="bulk-label">نسبة الزيادة (%)</label>
+                    <input id="bulk-value"
+                           type="number"
+                           step="0.01"
+                           min="0"
+                           class="input-base text-2xl sm:text-3xl font-bold text-center focus:border-amber-500 focus:ring-amber-500/10"
+                           placeholder="0">
+                </div>
+
+            </div>
+
+            <div class="p-5 sm:p-6 bg-slate-50 border-t border-slate-100 flex gap-3 rounded-b-2xl shrink-0">
+                <button onclick="closeBulkPriceModal()" class="btn-secondary flex-1">
+                    إلغاء
+                </button>
+                <button onclick="applyBulkPriceChange()" class="btn-success flex-1">
+                    تطبيق التعديل
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Firebase SDK - Compat Version -->
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+
+    <script>
+    // ==================== Firebase Configuration ====================
+    const firebaseConfig = {
+        apiKey: "AIzaSyBZxiuwzS2oEtTriBmUWo447VM8OAXnzss",
+        authDomain: "mustafaelazhary-5938a.firebaseapp.com",
+        projectId: "mustafaelazhary-5938a",
+        storageBucket: "mustafaelazhary-5938a.firebasestorage.app",
+        messagingSenderId: "986202492788",
+        appId: "1:986202492788:web:6c83a7b7c6940e0562e621"
+    };
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    // جعل db و auth متاحين في كل الدوال
+    window.db = db;
+    window.auth = auth;
+
+    console.log("✅ Firebase Firestore + Authentication تم تهيئتهما بنجاح");
+    </script>
+
+    <script src="script.js"></script>
+
 </div>
-
-<!-- Firebase SDK - Compat Version (الأسهل مع كودك الحالي) -->
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
-
-<script>
-// ==================== Firebase Configuration ====================
-const firebaseConfig = {
-    apiKey: "AIzaSyBZxiuwzS2oEtTriBmUWo447VM8OAXnzss",
-    authDomain: "mustafaelazhary-5938a.firebaseapp.com",
-    projectId: "mustafaelazhary-5938a",
-    storageBucket: "mustafaelazhary-5938a.firebasestorage.app",
-    messagingSenderId: "986202492788",
-    appId: "1:986202492788:web:6c83a7b7c6940e0562e621"
-};
-
-// Initialize Firebase
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-
-// جعل db متاح في كل الدوال
-window.db = db;
-
-console.log("✅ Firebase Firestore تم تهيئته بنجاح");
-</script>
-
-
-<script src="script.js"></script>
-
-
 </body>
 </html>
