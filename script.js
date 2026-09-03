@@ -2,7 +2,7 @@
 let products = [];
 let currentInvoice = [];
 let savedInvoices = [];
-let editingProductId = null;
+let editingProduct_id = null;
 let editingVariants = [];
 let customersBalance = {};
 let editingInvoiceIndex = null;   // ← مهم جدًا
@@ -84,6 +84,7 @@ function showToast(message, type = 'success') {
 let retailInvoice = [];
 let savedRetailInvoices = [];
 let editingRetailInvoiceIndex = null;     // ← مهم جدًا
+let retailStagingAdjustmentTouched = false; // هل المستخدم حط نسبة/مبلغ الزيادة قبل "إضافة للفاتورة" (البحر الأحمر/أكوا دلتا/Dr)
 let allRetailCustomers = [];              // للاقتراحات
 let retailPriceAdjustment = 0;   // قيمة الزيادة أو النقصان
 let retailAdjustmentType = 'percent';
@@ -91,6 +92,8 @@ let retailSelectedCompany = '';  // الشركة المختارة حاليًا �
 let retailAdjustmentConfirmed = false;   // (باقية لتوافق قديم، لم تعد تُستخدم للحجب)
 let retailItemAdjustmentConfirmed = false; // هل المستخدم حط نسبة/قيمة الزيادة أو النقصان الأول قبل إضافة منتج (للشركات العادية غير الثلاثة)
 let retailStaging = [];   // قائمة مؤقتة لمنتجات الشركة المختارة (البحر الأحمر/أكوا دلتا/Dr) قبل ما تتضاف للفاتورة الكلية
+let retailSessionAddedAt = Date.now();   // كل المنتجات اللي بتتضاف في نفس جلسة العمل (فاتورة جديدة أو تعديل) بتاخد نفس التاريخ ده
+let retailEditingPaymentContext = null;  // { index, paymentId } — الدفعة اللي بتتعدل دلوقتي (لو فيه)
 
 async function saveProducts() {
     try {
@@ -1552,6 +1555,91 @@ function closeBulkPriceModal() {
     modal.classList.remove('flex');
 }
 
+// بيحسب مكسب فاتورة واحدة (كل المنتجات فيها، بما فيها البحر الأحمر) — يُستخدم للعرض في الشاشة بس
+function computeRetailInvoiceProfit(items) {
+    if (!Array.isArray(items)) return 0;
+    return items.reduce((sum, item) => {
+        const base = Number(item.basePrice ?? item.price) || 0;
+        const price = Number(item.price) || 0;
+        const qty = Number(item.qty) || 0;
+        return sum + (price - base) * qty;
+    }, 0);
+}
+
+// ==================== المكسب: حساب الفرق بين السعر الأصلي والسعر المباع بيه (زيادات + تعديلات "تحكم") ====================
+// بيرجع تاريخ اليوم بصيغة YYYY-MM-DD حسب توقيت الجهاز (مش UTC) عشان يتوافق مع input type=date
+function toLocalDateKey(ts) {
+    const d = new Date(ts);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+// بيجمع مكسب كل عناصر كل الفواتير القطاعي (القديمة والجديدة) في خريطة باليوم
+// ملحوظة: منتجات "البحر الأحمر" مستبعدة تمامًا من حساب المكسب بناءً على طلب المستخدم
+function buildRetailProfitByDay() {
+    const map = {}; // { 'YYYY-MM-DD': profitAmount }
+    savedRetailInvoices.forEach(inv => {
+        if (!Array.isArray(inv.items)) return;
+        inv.items.forEach(item => {
+            if (item.company === 'redsea') return; // استبعاد البحر الأحمر
+            const base = Number(item.basePrice ?? item.price) || 0;
+            const price = Number(item.price) || 0;
+            const qty = Number(item.qty) || 0;
+            const profit = (price - base) * qty;
+            if (!profit) return;
+            const ts = Number(item.addedAt) || Number(inv.date) || Date.now();
+            const key = toLocalDateKey(ts);
+            map[key] = (map[key] || 0) + profit;
+        });
+    });
+    return map;
+}
+
+window.openProfitModal = function() {
+    const dateInput = document.getElementById('profit-date-input');
+    if (dateInput && !dateInput.value) {
+        dateInput.value = toLocalDateKey(Date.now());
+    }
+    renderProfitModal();
+    const modal = document.getElementById('profit-modal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+};
+
+window.closeProfitModal = function() {
+    const modal = document.getElementById('profit-modal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+};
+
+window.renderProfitModal = function() {
+    const dateInput = document.getElementById('profit-date-input');
+    if (!dateInput) return;
+    const selected = dateInput.value ? new Date(dateInput.value + 'T00:00:00') : new Date();
+    const selectedKey = toLocalDateKey(selected.getTime());
+    const selectedYear = selected.getFullYear();
+    const selectedMonth = selected.getMonth();
+
+    const profitByDay = buildRetailProfitByDay();
+
+    let dayProfit = 0, monthProfit = 0, yearProfit = 0;
+    Object.entries(profitByDay).forEach(([key, amount]) => {
+        const [y, m, d] = key.split('-').map(Number);
+        if (key === selectedKey) dayProfit += amount;
+        if (y === selectedYear && (m - 1) === selectedMonth) monthProfit += amount;
+        if (y === selectedYear) yearProfit += amount;
+    });
+
+    const dayEl = document.getElementById('profit-day-value');
+    const monthEl = document.getElementById('profit-month-value');
+    const yearEl = document.getElementById('profit-year-value');
+    if (dayEl) dayEl.textContent = `${dayProfit.toFixed(2)} جنيه`;
+    if (monthEl) monthEl.textContent = `${monthProfit.toFixed(2)} جنيه`;
+    if (yearEl) yearEl.textContent = `${yearProfit.toFixed(2)} جنيه`;
+};
+
 document.getElementById('go-top').addEventListener('click', function () {
     window.scrollTo({
         top: 0,
@@ -1730,6 +1818,7 @@ function handleRetailCompanyChange() {
     }
 
     retailSelectedCompany = newCompany;
+    retailStagingAdjustmentTouched = false; // شركة جديدة = لازم يحط النسبة/المبلغ تاني
 
     // تصفير حقل المنتج والمقاس عند تغيير الشركة
     const productInput = document.getElementById('retail-product-search');
@@ -1825,6 +1914,9 @@ window.updateRetailStagingQty = function(id, newQty) {
 };
 
 window.removeRetailStagingItem = function(id) {
+    const removed = retailStaging.find(i => i.id === id);
+    if (!removed) return;
+    if (!confirm(`هل تريد حذف "${removed.productName}" (${removed.size}) من القائمة المؤقتة؟`)) return;
     retailStaging = retailStaging.filter(i => i.id !== id);
     renderRetailStaging();
 };
@@ -1838,6 +1930,10 @@ function commitRetailStagingToInvoice() {
 
     if (retailStaging.length === 0) {
         return alert('❌ لسه معملتش إضافة منتجات للقائمة المؤقتة');
+    }
+
+    if (!retailStagingAdjustmentTouched) {
+        return alert('⚠️ لازم تحط نسبة الزيادة أو النقصان الأول (حتى لو صفر) قبل ما تضيف للفاتورة');
     }
 
     const typeSelect = document.getElementById('retail-invoice-adjust-type');
@@ -1860,7 +1956,8 @@ function commitRetailStagingToInvoice() {
                 company: retailSelectedCompany,
                 isPercentGroup: true,
                 adjustType: type,
-                adjustValue: value
+                adjustValue: value,
+                addedAt: retailSessionAddedAt
             });
         });
     } else {
@@ -1885,7 +1982,8 @@ function commitRetailStagingToInvoice() {
                 company: retailSelectedCompany,
                 isPercentGroup: true,
                 adjustType: type,
-                adjustValue: value
+                adjustValue: value,
+                addedAt: retailSessionAddedAt
             });
         });
     }
@@ -1893,6 +1991,7 @@ function commitRetailStagingToInvoice() {
     // تصفير القائمة المؤقتة وحقل القيمة بعد الإضافة
     retailStaging = [];
     if (valueInput) valueInput.value = 0;
+    retailStagingAdjustmentTouched = false; // لازم يحط القيمة تاني قبل الدفعة الجاية
 
     renderRetailStaging();
     renderRetailPercentGroups();
@@ -1929,6 +2028,7 @@ window.editRetailPercentGroup = function(companyId) {
     const valueInput = document.getElementById('retail-invoice-adjust-value');
     if (typeSelect) typeSelect.value = sample.adjustType || 'percent';
     if (valueInput) valueInput.value = sample.adjustValue || 0;
+    retailStagingAdjustmentTouched = true; // القيمة رجعت من تعديل سابق، فمعتبرينها متحطوطة فعلاً
 
     toggleRetailAdjustmentUI();
     renderRetailStaging();
@@ -1960,6 +2060,22 @@ function handleRetailProductSearch(val) {
     if (!sizeSelect) return;
     sizeSelect.innerHTML = '<option value="">اختر المقاس...</option>';
 
+    // إصلاح مشكلة شائعة في المتصفح: بعد ما تختار منتج وتمسح الكتابة، قائمة الاقتراحات
+    // ممكن متظهرش تاني إلا لو دوست برة الخانة ووقفت عليها من جديد. الحل إننا نعيد
+    // تعبئة القائمة، ولو الخانة بقت فاضية نعمل blur/focus سريع يجبر المتصفح يفتح
+    // قائمة الاقتراحات تلقائيًا من غير ما يحتاج المستخدم يدوس تاني بنفسه.
+    const productInput = document.getElementById('retail-product-search');
+    if (productInput) {
+        populateRetailProductDatalist(retailSelectedCompany);
+        if (val === '' && document.activeElement === productInput) {
+            productInput.blur();
+            requestAnimationFrame(() => productInput.focus());
+        } else {
+            productInput.removeAttribute('list');
+            requestAnimationFrame(() => productInput.setAttribute('list', 'retail-products-datalist'));
+        }
+    }
+
     const product = products.find(p => p.name === val);
     if (!product || !Array.isArray(product.variants)) return;
 
@@ -1989,7 +2105,16 @@ function renderRetailTable() {
             <td class="py-5 px-6 text-center text-lg">${item.size}</td>
             <td class="py-5 px-6 text-center no-print text-slate-400">${Number(item.basePrice ?? item.price).toFixed(2)}</td>
             <td class="py-5 px-6 text-center">${Number(item.price).toFixed(2)}</td>
-            <td class="py-5 px-6 text-center text-lg font-medium">${item.qty}</td>
+            <td class="py-5 px-6 text-center">
+                <div class="flex items-center justify-center gap-1 no-print">
+                    <button onclick="updateRetailItemQty(${item.id}, ${item.qty - 1})" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">−</button>
+                    <input type="number" min="1" value="${item.qty}"
+                           onchange="updateRetailItemQty(${item.id}, this.value)"
+                           class="w-14 text-center border border-gray-200 rounded-lg py-1.5 text-lg font-medium">
+                    <button onclick="updateRetailItemQty(${item.id}, ${item.qty + 1})" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+                </div>
+                <span class="hidden print:inline text-lg font-medium">${item.qty}</span>
+            </td>
             <td class="py-5 px-6 text-center font-bold">${item.subtotal.toFixed(2)}</td>
             <td class="py-5 px-6 text-center no-print">
                 <button onclick="removeRetailItemById(${item.id})" class="text-red-500 hover:text-red-700 text-3xl">🗑️</button>
@@ -2000,6 +2125,18 @@ function renderRetailTable() {
 
     renderRetailPercentGroups();
 }
+
+// ==================== تعديل كمية منتج عادي (مش شركات نسبة) داخل الفاتورة الحالية قبل الحفظ ====================
+window.updateRetailItemQty = function(id, newQty) {
+    const qty = parseInt(newQty) || 1;
+    const item = retailInvoice.find(i => i.id === id);
+    if (!item) return;
+    item.qty = qty < 1 ? 1 : qty;
+    item.subtotal = item.price * item.qty;
+
+    renderRetailTable();
+    updateRetailTotalAndRemaining();
+};
 
 // ==================== إعادة حساب مجموعة "مبلغ ثابت" من الأصل (عشان الإضافة تفضل ثابتة دايمًا) ====================
 // بتتنادى كل ما الكمية تتغير أو منتج يتشال من مجموعة شركة، عشان الـ 30 جنيه (مثلاً)
@@ -2025,14 +2162,19 @@ function recalcFixedGroup(companyId) {
 // ==================== حذف منتج من الفاتورة القطاعية (بالـ id) ====================
 window.removeRetailItemById = function(id) {
     const removed = retailInvoice.find(item => item.id === id);
+    if (!removed) return;
+
+    if (!confirm(`هل تريد حذف "${removed.productName}" (${removed.size}) من الفاتورة؟`)) return;
+
     retailInvoice = retailInvoice.filter(item => item.id !== id);
 
-    if (removed && removed.isPercentGroup) {
+    if (removed.isPercentGroup) {
         recalcFixedGroup(removed.company);
     }
 
     renderRetailTable();
     updateRetailTotalAndRemaining();
+    showToast(`🗑️ تم حذف "${removed.productName}" من الفاتورة`, 'error');
 };
 
 // ==================== تعديل كمية منتج داخل مربع شركة (البحر الأحمر / أكوا دلتا / Dr) ====================
@@ -2103,9 +2245,13 @@ function renderRetailPercentGroups() {
                                 <td class="py-4 px-4 text-center no-print text-slate-400">${Number(item.basePrice).toFixed(2)}</td>
                                 <td class="py-4 px-4 text-center">${Number(item.price).toFixed(2)}</td>
                                 <td class="py-4 px-4 text-center">
-                                    <input type="number" min="1" value="${item.qty}"
-                                           onchange="updateRetailPercentItemQty(${item.id}, this.value)"
-                                           class="w-16 text-center border border-rose-200 rounded-lg py-1 no-print">
+                                    <div class="flex items-center justify-center gap-1 no-print">
+                                        <button onclick="updateRetailPercentItemQty(${item.id}, ${item.qty - 1})" class="w-8 h-8 rounded-lg bg-rose-100 hover:bg-rose-200 text-lg font-bold text-rose-600">−</button>
+                                        <input type="number" min="1" value="${item.qty}"
+                                               onchange="updateRetailPercentItemQty(${item.id}, this.value)"
+                                               class="w-14 text-center border border-rose-200 rounded-lg py-1">
+                                        <button onclick="updateRetailPercentItemQty(${item.id}, ${item.qty + 1})" class="w-8 h-8 rounded-lg bg-rose-100 hover:bg-rose-200 text-lg font-bold text-rose-600">+</button>
+                                    </div>
                                     <span class="hidden print:inline">${item.qty}</span>
                                 </td>
                                 <td class="py-4 px-4 text-center font-bold">${item.subtotal.toFixed(2)}</td>
@@ -2315,19 +2461,39 @@ function saveRetailInvoice() {
     }
 
     const { currentTotal } = updateRetailTotalAndRemaining();
+    const initialPaidValue = parseFloat(document.getElementById("retail-paid-input").value) || 0;
+
+    const oldInvoice = editingRetailInvoiceIndex !== null ? savedRetailInvoices[editingRetailInvoiceIndex] : null;
+
+    // ==================== سجل الدفعات ====================
+    // فاتورة جديدة: خانة "المبلغ المدفوع" فوق الفاتورة بتبقى أول دفعة بتاريخ النهارده.
+    // فاتورة بتتعدل (بنضيف منتجات مثلاً): سجل الدفعات القديم بتاعها بيفضل زي ما هو من غير أي تغيير —
+    // أي دفعة جديدة تتضاف بعد كده لازم تبقى من زرار "دفع المتبقي" بتاريخها الخاص، مش من هنا،
+    // عشان منضربش سجل الدفعات القديم.
+    let payments;
+    if (oldInvoice) {
+        payments = Array.isArray(oldInvoice.payments) ? JSON.parse(JSON.stringify(oldInvoice.payments)) : [];
+        if (payments.length === 0 && Number(oldInvoice.paid) > 0) {
+            payments = [{ amount: Number(oldInvoice.paid), date: oldInvoice.date }];
+        }
+    } else {
+        payments = initialPaidValue > 0 ? [{ id: Date.now() + '-' + Math.floor(Math.random() * 100000), amount: initialPaidValue, date: Date.now() }] : [];
+    }
+    const totalPaid = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
     const invoice = {
         customer: customer || 'عميل غير محدد',
         items: JSON.parse(JSON.stringify(retailInvoice)),
         total: Number(currentTotal.toFixed(2)),
-        paid: parseFloat(document.getElementById("retail-paid-input").value) || 0,
-        date: Date.now()
+        paid: Number(totalPaid.toFixed(2)),
+        payments: payments,
+        // الفاتورة كلها بتحتفظ بتاريخها الأصلي حتى لو اتعدلت وأضيفت منتجات جديدة ليها
+        date: oldInvoice ? oldInvoice.date : Date.now()
     };
 
     // المخزون بينقص بس لما الفاتورة تتحفظ نهائي
     if (editingRetailInvoiceIndex !== null) {
         // فاتورة بتتعدل: رجّع كمية الفاتورة القديمة الأول، وبعدين انقص كمية الفاتورة الجديدة
-        const oldInvoice = savedRetailInvoices[editingRetailInvoiceIndex];
         if (oldInvoice) adjustStockForItems(oldInvoice.items, +1);
         savedRetailInvoices[editingRetailInvoiceIndex] = invoice;
     } else {
@@ -2342,6 +2508,7 @@ function saveRetailInvoice() {
     retailInvoice = [];
     retailStaging = [];
     editingRetailInvoiceIndex = null;
+    retailSessionAddedAt = Date.now();
 
     renderRetailTable();
     renderRetailStaging();
@@ -2349,9 +2516,18 @@ function saveRetailInvoice() {
     updateRetailTotalAndRemaining();
 
     if (customerInput) customerInput.value = '';
-    document.getElementById('retail-paid-input').value = '0';
+    const paidInputAfterSave = document.getElementById('retail-paid-input');
+    if (paidInputAfterSave) {
+        paidInputAfterSave.value = '0';
+        paidInputAfterSave.readOnly = false;
+        paidInputAfterSave.classList.remove('opacity-60', 'cursor-not-allowed');
+        paidInputAfterSave.title = '';
+    }
     const remEl = document.getElementById('retail-remaining-input');
     if (remEl) remEl.value = '0';
+
+    const cancelBtnAfterSave = document.getElementById('cancel-edit-retail-btn');
+    if (cancelBtnAfterSave) cancelBtnAfterSave.classList.add('hidden');
 
     updateRetailInvoiceHeader();
     renderRetailInvoices();
@@ -2389,6 +2565,136 @@ function recalculateAllRetailInvoicesForCustomer(customerName) {
     }
 }
 
+// ==================== ضمان إن كل منتج في الفاتورة ليه id ثابت (عشان نقدر نعدّل عليه لوحده) ====================
+function ensureRetailItemIds(inv) {
+    if (!Array.isArray(inv.items)) return inv.items;
+    inv.items.forEach(item => {
+        if (item.id === undefined || item.id === null) {
+            item.id = Date.now() + '-' + Math.floor(Math.random() * 100000);
+        }
+    });
+    return inv.items;
+}
+
+// ==================== التحكم في سعر القطعة الواحدة لمنتج بعينه داخل فاتورة قطاعي محفوظة ====================
+// بيغيّر سعر القطعة، والإجمالي بيتحدث تلقائيًا (سعر جديد × الكمية)
+// كان/بقى بيتحفظ ويظهر في الشاشة بس، ومش بيظهر في الطباعة
+window.editRetailInvoiceItemTotal = function(invIndex, itemId) {
+    const inv = savedRetailInvoices[invIndex];
+    if (!inv || !Array.isArray(inv.items)) return;
+
+    const item = inv.items.find(it => String(it.id) === String(itemId));
+    if (!item) return;
+
+    const oldPrice = Number(item.price) || 0;
+    const qty = Number(item.qty) || 1;
+
+    const wantsToEdit = confirm(`سعر القطعة الواحدة من "${item.productName}" حاليًا ${oldPrice.toFixed(2)} جنيه.\nهل تريد تغيير السعر؟`);
+    if (!wantsToEdit) return;
+
+    const input = prompt(`اكتب السعر الجديد للقطعة الواحدة من "${item.productName}" (جنيه):`, oldPrice.toFixed(2));
+    if (input === null) return; // المستخدم ضغط إلغاء
+
+    const newPrice = Number(input);
+    if (isNaN(newPrice) || newPrice <= 0) {
+        showToast('❌ من فضلك أدخل رقم صحيح أكبر من صفر', 'error');
+        return;
+    }
+
+    // بيتحدث سعر القطعة الواحدة، والإجمالي بيتحسب تلقائيًا (سعر × كمية)
+    item.price = Number(newPrice.toFixed(2));
+    item.subtotal = Number((item.price * qty).toFixed(2));
+
+    // بنسجل كان بكام وبقى بكام عشان يظهر في الشاشة بس (مش في الطباعة)
+    item.priceEdited = true;
+    item.priceEditedFrom = oldPrice;
+
+    // إجمالي الفاتورة بيتحدث تلقائيًا كمجموع كل المنتجات
+    inv.total = Number(inv.items.reduce((sum, it) => sum + (Number(it.subtotal) || 0), 0).toFixed(2));
+
+    recalculateAllRetailInvoicesForCustomer(inv.customer);
+    saveAllRetailInvoices();
+    renderRetailInvoices();
+
+    showToast(`✅ سعر "${item.productName}" كان ${oldPrice.toFixed(2)} جنيه وبقى ${item.price.toFixed(2)} جنيه`, 'success');
+};
+
+// ==================== تنسيق تاريخ/وقت موحّد ====================
+function formatRetailDateTime(ts) {
+    const d = new Date(ts);
+    const date = d.toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
+    const time = d.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+    return `${date} - ${time}`;
+}
+
+// ==================== تجميع منتجات الفاتورة حسب وقت إضافتها ====================
+// كل مجموعة بتاريخها: المنتجات القديمة تفضل بتاريخ الفاتورة الأصلي، والمنتج اللي بيتضاف بعدين
+// (عند تعديل الفاتورة) بيظهر في مجموعة جديدة فوق بتاريخ إضافته هو
+function groupRetailItemsByAddedAt(items, fallbackDate) {
+    const map = new Map();
+    (items || []).forEach(item => {
+        const key = Number(item.addedAt) || Number(fallbackDate) || 0;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(item);
+    });
+    return Array.from(map.entries())
+        .map(([date, its]) => ({ date, items: its }))
+        .sort((a, b) => b.date - a.date); // الأحدث فوق
+}
+
+function retailItemsRowsHtml(items, invIndex) {
+    return items.map(item => `
+        <tr class="border-b">
+            <td class="py-2 px-4 text-right">${item.productName}</td>
+            <td class="py-2 px-4 text-center">${item.size}</td>
+            <td class="py-2 px-4 text-center">
+                <div class="flex flex-col items-center justify-center gap-1">
+                    <div class="flex items-center justify-center gap-2">
+                        <span>${Number(item.price).toFixed(2)}</span>
+                        <button onclick="editRetailInvoiceItemTotal(${invIndex}, '${item.id}')" class="text-purple-600 text-xs underline font-normal">✏️ تحكم</button>
+                    </div>
+                    ${item.priceEdited ? `<div class="text-[11px] text-amber-600">كان ${Number(item.priceEditedFrom).toFixed(2)} وبقى ${Number(item.price).toFixed(2)}</div>` : ''}
+                </div>
+            </td>
+            <td class="py-2 px-4 text-center">${item.qty}</td>
+            <td class="py-2 px-4 text-center font-bold">${Number(item.subtotal).toFixed(2)}</td>
+        </tr>
+    `).join('');
+}
+
+// ==================== ضمان إن كل دفعة ليها id ثابت (ولترحيل الفواتير القديمة اللي معندهاش سجل دفعات) ====================
+function ensureRetailPayments(inv) {
+    if (!Array.isArray(inv.payments)) inv.payments = [];
+    if (inv.payments.length === 0 && Number(inv.paid) > 0) {
+        inv.payments.push({ amount: Number(inv.paid), date: inv.date });
+    }
+    inv.payments.forEach(p => {
+        if (p.id === undefined || p.id === null) {
+            p.id = Date.now() + '-' + Math.floor(Math.random() * 100000);
+        }
+    });
+    return inv.payments;
+}
+
+// ==================== بناء سجل الدفعات مع حساب المتبقي بعد كل دفعة ====================
+function computeRetailPaymentsHistory(inv, grandTotal) {
+    const list = ensureRetailPayments(inv)
+        .filter(p => Number(p.amount) > 0)
+        .slice()
+        .sort((a, b) => a.date - b.date);
+
+    let cumulative = 0;
+    return list.map(p => {
+        cumulative += Number(p.amount) || 0;
+        return {
+            id: p.id,
+            amount: Number(p.amount) || 0,
+            date: p.date,
+            remainingAfter: Math.max(0, Number((grandTotal - cumulative).toFixed(2)))
+        };
+    });
+}
+
 // ==================== عرض الفواتير السابقة (كاملة مثل التجار) ====================
 function renderRetailInvoices() {
     const container = document.getElementById('saved-retail-invoices-list');
@@ -2409,7 +2715,23 @@ function renderRetailInvoices() {
         const previousDebt = getRetailCustomerPreviousDebt(inv.customer, index);
         const grandTotal = currentTotal + previousDebt;
         const paid = Number(inv.paid) || 0;
-        const remaining = grandTotal - paid;
+        const remaining = Math.max(0, grandTotal - paid);
+
+        const itemGroups = groupRetailItemsByAddedAt(inv.items, inv.date);
+        ensureRetailItemIds(inv);
+        const itemsHtml = itemGroups.length > 1
+            ? itemGroups.map(group => `
+                <tr class="bg-amber-50">
+                    <td colspan="5" class="py-2 px-4 text-right text-xs font-semibold text-amber-700">
+                        🕒 أُضيف بتاريخ: ${formatRetailDateTime(group.date)}
+                    </td>
+                </tr>
+                ${retailItemsRowsHtml(group.items, index)}
+            `).join('')
+            : retailItemsRowsHtml(inv.items, index);
+
+        const paymentsHistory = computeRetailPaymentsHistory(inv, grandTotal);
+        const invoiceProfit = computeRetailInvoiceProfit(inv.items);
 
         const card = document.createElement('div');
         card.className = 'bg-gray-50 rounded-xl p-4 shadow-sm';
@@ -2419,6 +2741,7 @@ function renderRetailInvoices() {
                 <div class="font-semibold">${inv.customer}</div>
                 <div class="text-gray-500 text-sm">${formattedDate} - ${formattedTime}</div>
             </div>
+            <div class="no-print text-xs font-semibold text-amber-600 mb-2">💰 مكسب هذه الفاتورة: ${invoiceProfit.toFixed(2)} جنيه</div>
             <button onclick="toggleRetailInvoiceDetails(${index})" class="text-green-600 underline mb-3">عرض المنتجات</button>
             <div id="retail-invoice-details-${index}" class="hidden">
                 <table class="w-full text-right border-collapse mb-4">
@@ -2430,26 +2753,58 @@ function renderRetailInvoices() {
                         <th class="py-2 px-4">الإجمالي</th>
                     </tr></thead>
                     <tbody>
-                        ${inv.items.map(item => `
-                            <tr class="border-b">
-                                <td class="py-2 px-4 text-right">${item.productName}</td>
-                                <td class="py-2 px-4 text-center">${item.size}</td>
-                                <td class="py-2 px-4 text-center">${item.price}</td>
-                                <td class="py-2 px-4 text-center">${item.qty}</td>
-                                <td class="py-2 px-4 text-center font-bold">${item.subtotal}</td>
-                            </tr>
-                        `).join('')}
+                        ${itemsHtml}
                     </tbody>
                 </table>
                 <div class="bg-white rounded-2xl p-5 shadow-sm">
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
-                        <div><div class="text-xs text-gray-500 mb-1">إجمالي الفاتورة الجديدة</div><div class="text-2xl font-bold text-blue-600">${currentTotal.toFixed(2)} جنيه</div></div>
-                        <div><div class="text-xs text-gray-500 mb-1">المبلغ المدفوع</div><div class="text-2xl font-bold text-green-600">${paid.toFixed(2)} جنيه</div></div>
-                        <div class="md:col-span-3 mt-4 pt-4 border-t"><div class="text-xs text-gray-500 mb-1">المتبقي النهائي</div><div class="text-3xl font-bold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}">${remaining.toFixed(2)} جنيه</div></div>
+                    <div class="text-center">
+                        <div class="text-xs text-gray-500 mb-1">إجمالي الفاتورة</div>
+                        <div class="text-2xl font-bold text-blue-600">${grandTotal.toFixed(2)} جنيه</div>
+                    </div>
+                    ${paymentsHistory.length > 0 ? `
+                        <div class="space-y-2 mt-4 pt-4 border-t">
+                            ${paymentsHistory.map(p => `
+                                <div class="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2 text-sm gap-2 flex-wrap">
+                                    <div class="text-slate-400 text-xs">${formatRetailDateTime(p.date)}</div>
+                                    <div class="text-green-600 font-semibold">دفع ${p.amount.toFixed(2)} جنيه</div>
+                                    <div class="${p.remainingAfter > 0 ? 'text-red-600' : 'text-green-600'} font-bold">متبقي ${p.remainingAfter.toFixed(2)} جنيه</div>
+                                    <div class="flex items-center gap-3">
+                                        <button onclick="startEditRetailPayment(${index}, '${p.id}')" class="text-amber-600 text-xs underline">✏️ تعديل</button>
+                                        <button onclick="deleteRetailPayment(${index}, '${p.id}')" class="text-red-600 text-xs underline">🗑️ حذف</button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+                    <div class="mt-4 pt-4 border-t text-center">
+                        <div class="text-xs text-gray-500 mb-1">المتبقي النهائي</div>
+                        <div class="text-3xl font-bold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}">${remaining.toFixed(2)} جنيه</div>
                     </div>
                 </div>
-                <div class="flex justify-end gap-4 mt-4">
+
+                <div id="retail-edit-payment-form-${index}" class="hidden mt-4 bg-blue-50 border border-blue-200 rounded-xl p-4">
+                    <label class="block text-sm font-semibold text-blue-700 mb-2">تعديل مبلغ الدفعة</label>
+                    <div class="flex gap-2 flex-wrap">
+                        <input id="retail-edit-payment-amount-${index}" type="number" min="0" step="0.01" class="input-base flex-1 min-w-[140px]">
+                        <button onclick="saveEditedRetailPayment(${index})" class="btn-success !px-5">حفظ</button>
+                        <button onclick="cancelEditRetailPayment(${index})" class="btn-secondary !px-5">إلغاء</button>
+                    </div>
+                </div>
+
+                <div id="retail-pay-form-${index}" class="hidden mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4">
+                    <label class="block text-sm font-semibold text-amber-700 mb-2">إضافة دفعة جديدة (المتبقي حاليًا ${remaining.toFixed(2)} جنيه)</label>
+                    <div class="flex gap-2 flex-wrap">
+                        <input id="retail-pay-amount-${index}" type="number" min="0" step="0.01" placeholder="المبلغ..." class="input-base flex-1 min-w-[140px]">
+                        <button onclick="submitRetailPayment(${index})" class="btn-success !px-5">حفظ</button>
+                        <button onclick="cancelRetailPayForm(${index})" class="btn-secondary !px-5">إلغاء</button>
+                    </div>
+                </div>
+
+                <div class="flex justify-center items-center flex-wrap gap-4 mt-4">
                     <button onclick="printRetailSavedInvoice(${index})" class="text-green-600 underline">طباعة</button>
+                    ${remaining > 0
+                        ? `<button onclick="toggleRetailPayForm(${index})" class="text-blue-600 underline font-semibold">💰 دفع المتبقي</button>`
+                        : `<span class="text-emerald-600 font-semibold">✅ تم السداد بالكامل</span>`}
                     <button onclick="editRetailSavedInvoice(${index})" class="text-amber-600 underline">تعديل</button>
                     <button onclick="deleteRetailSavedInvoice(${index})" class="text-red-600 underline">حذف</button>
                 </div>
@@ -2458,6 +2813,138 @@ function renderRetailInvoices() {
         container.appendChild(card);
     });
 }
+
+// ==================== دفع المتبقي (دفعة جديدة بتاريخها الخاص) ====================
+window.toggleRetailPayForm = function(index) {
+    // اقفل فورم تعديل الدفعة لو مفتوح
+    const editForm = document.getElementById(`retail-edit-payment-form-${index}`);
+    if (editForm) editForm.classList.add('hidden');
+    retailEditingPaymentContext = null;
+
+    const form = document.getElementById(`retail-pay-form-${index}`);
+    if (form) form.classList.toggle('hidden');
+};
+
+window.cancelRetailPayForm = function(index) {
+    const input = document.getElementById(`retail-pay-amount-${index}`);
+    if (input) input.value = '';
+    const form = document.getElementById(`retail-pay-form-${index}`);
+    if (form) form.classList.add('hidden');
+};
+
+window.submitRetailPayment = function(index) {
+    const input = document.getElementById(`retail-pay-amount-${index}`);
+    if (!input) return;
+    const amount = parseFloat(input.value) || 0;
+    if (amount <= 0) return alert('❌ اكتب مبلغ صحيح أكبر من صفر');
+
+    const inv = savedRetailInvoices[index];
+    if (!inv) return;
+    ensureRetailPayments(inv);
+
+    const currentTotal = Number(inv.total) || 0;
+    const previousDebt = getRetailCustomerPreviousDebt(inv.customer, index);
+    const grandTotal = currentTotal + previousDebt;
+    const paidSoFar = inv.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    const remainingNow = Math.max(0, grandTotal - paidSoFar);
+
+    if (amount > remainingNow + 0.009) {
+        return alert(`❌ المبلغ أكبر من المتبقي (المتبقي حاليًا ${remainingNow.toFixed(2)} جنيه)`);
+    }
+
+    inv.payments.push({ id: Date.now() + '-' + Math.floor(Math.random() * 100000), amount: amount, date: Date.now() });
+    inv.paid = Number((paidSoFar + amount).toFixed(2));
+
+    recalculateAllRetailInvoicesForCustomer(inv.customer);
+    saveAllRetailInvoices();
+    renderRetailInvoices();
+
+    showToast('✅ تم تسجيل الدفعة بنجاح', 'success');
+};
+
+// ==================== تعديل / حذف دفعة مسجّلة قبل كده ====================
+window.startEditRetailPayment = function(index, paymentId) {
+    const inv = savedRetailInvoices[index];
+    if (!inv) return;
+    ensureRetailPayments(inv);
+
+    const payment = inv.payments.find(p => String(p.id) === String(paymentId));
+    if (!payment) return;
+
+    retailEditingPaymentContext = { index, paymentId: String(paymentId) };
+
+    // اقفل فورم إضافة دفعة جديدة لو مفتوح
+    const addForm = document.getElementById(`retail-pay-form-${index}`);
+    if (addForm) addForm.classList.add('hidden');
+
+    const editForm = document.getElementById(`retail-edit-payment-form-${index}`);
+    const editInput = document.getElementById(`retail-edit-payment-amount-${index}`);
+    if (editInput) editInput.value = Number(payment.amount).toFixed(2);
+    if (editForm) editForm.classList.remove('hidden');
+};
+
+window.cancelEditRetailPayment = function(index) {
+    retailEditingPaymentContext = null;
+    const editForm = document.getElementById(`retail-edit-payment-form-${index}`);
+    if (editForm) editForm.classList.add('hidden');
+};
+
+window.saveEditedRetailPayment = function(index) {
+    if (!retailEditingPaymentContext || retailEditingPaymentContext.index !== index) return;
+
+    const inv = savedRetailInvoices[index];
+    if (!inv) return;
+    ensureRetailPayments(inv);
+
+    const payment = inv.payments.find(p => String(p.id) === String(retailEditingPaymentContext.paymentId));
+    if (!payment) return;
+
+    const input = document.getElementById(`retail-edit-payment-amount-${index}`);
+    const newAmount = parseFloat(input ? input.value : 0) || 0;
+    if (newAmount <= 0) return alert('❌ اكتب مبلغ صحيح أكبر من صفر');
+
+    const currentTotal = Number(inv.total) || 0;
+    const previousDebt = getRetailCustomerPreviousDebt(inv.customer, index);
+    const grandTotal = currentTotal + previousDebt;
+    const otherPaymentsSum = inv.payments
+        .filter(p => String(p.id) !== String(payment.id))
+        .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+
+    if (otherPaymentsSum + newAmount > grandTotal + 0.009) {
+        return alert(`❌ مجموع الدفعات هيتخطى إجمالي الفاتورة (الإجمالي ${grandTotal.toFixed(2)} جنيه)`);
+    }
+
+    payment.amount = newAmount;
+    inv.paid = Number((otherPaymentsSum + newAmount).toFixed(2));
+
+    recalculateAllRetailInvoicesForCustomer(inv.customer);
+    saveAllRetailInvoices();
+
+    retailEditingPaymentContext = null;
+    renderRetailInvoices();
+    showToast('✅ تم تعديل الدفعة بنجاح', 'success');
+};
+
+window.deleteRetailPayment = function(index, paymentId) {
+    const inv = savedRetailInvoices[index];
+    if (!inv) return;
+    ensureRetailPayments(inv);
+
+    if (!confirm('هل تريد حذف هذه الدفعة؟')) return;
+
+    inv.payments = inv.payments.filter(p => String(p.id) !== String(paymentId));
+    inv.paid = Number(inv.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0).toFixed(2));
+
+    if (retailEditingPaymentContext && retailEditingPaymentContext.index === index &&
+        String(retailEditingPaymentContext.paymentId) === String(paymentId)) {
+        retailEditingPaymentContext = null;
+    }
+
+    recalculateAllRetailInvoicesForCustomer(inv.customer);
+    saveAllRetailInvoices();
+    renderRetailInvoices();
+    showToast('🗑️ تم حذف الدفعة', 'error');
+};
 
 window.toggleRetailInvoiceDetails = function(index) {
     const detailsDiv = document.getElementById(`retail-invoice-details-${index}`);
@@ -2473,21 +2960,65 @@ window.editRetailSavedInvoice = function(index) {
     editingRetailInvoiceIndex = index;
     retailInvoice = JSON.parse(JSON.stringify(invoice.items));
     retailStaging = [];
+    retailSessionAddedAt = Date.now(); // أي منتجات تتضاف أثناء التعديل ده كله هتاخد نفس التاريخ ده
 
     const customerInput = document.getElementById('retail-customer-name');
     if (customerInput) customerInput.value = invoice.customer;
 
     const paidInput = document.getElementById('retail-paid-input');
-    if (paidInput) paidInput.value = Number(invoice.paid || 0).toFixed(2);
+    if (paidInput) {
+        paidInput.value = Number(invoice.paid || 0).toFixed(2);
+        // المبلغ المدفوع بقى بيتحدث بس من زرار "دفع المتبقي" في قائمة الفواتير،
+        // عشان منضربش سجل الدفعات القديم بتاريخه.
+        paidInput.readOnly = true;
+        paidInput.classList.add('opacity-60', 'cursor-not-allowed');
+        paidInput.title = 'لإضافة دفعة جديدة استخدم زرار "دفع المتبقي" في قائمة الفواتير السابقة';
+    }
 
     renderRetailTable();
     renderRetailStaging();
     updateRetailTotalAndRemaining();
     updateRetailInvoiceHeader();
 
-    showSection('retail');
+    const cancelBtn = document.getElementById('cancel-edit-retail-btn');
+    if (cancelBtn) cancelBtn.classList.remove('hidden');
 
-    showToast('✏️ جاري تعديل فاتورة القطاعي...', 'warning');
+    showSection('retail');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    showToast('✏️ جاري تعديل فاتورة القطاعي... (لإضافة دفعة استخدم زرار دفع المتبقي)', 'warning');
+};
+
+// ==================== إلغاء التعديل والرجوع للفاتورة الأصلية كما كانت محفوظة ====================
+window.cancelEditRetailInvoice = function() {
+    if (!confirm('هل تريد إلغاء التعديل؟ أي تغييرات عملتها في الفاتورة دي هتتلغي.')) return;
+
+    editingRetailInvoiceIndex = null;
+    retailInvoice = [];
+    retailStaging = [];
+    retailSessionAddedAt = Date.now();
+
+    const customerInput = document.getElementById('retail-customer-name');
+    if (customerInput) customerInput.value = '';
+
+    const paidInput = document.getElementById('retail-paid-input');
+    if (paidInput) {
+        paidInput.value = '0';
+        paidInput.readOnly = false;
+        paidInput.classList.remove('opacity-60', 'cursor-not-allowed');
+        paidInput.title = '';
+    }
+
+    renderRetailTable();
+    renderRetailStaging();
+    renderRetailPercentGroups();
+    updateRetailTotalAndRemaining();
+    updateRetailInvoiceHeader();
+
+    const cancelBtn = document.getElementById('cancel-edit-retail-btn');
+    if (cancelBtn) cancelBtn.classList.add('hidden');
+
+    showToast('❌ تم إلغاء التعديل', 'error');
 };
 
 window.deleteRetailSavedInvoice = function(index) {
@@ -2516,8 +3047,32 @@ window.printRetailSavedInvoice = function(index) {
 
     const currentTotal = Number(inv.total) || 0;
     const previousDebt = getRetailCustomerPreviousDebt(inv.customer, index);
+    const grandTotal = currentTotal + previousDebt;
     const paid = Number(inv.paid) || 0;
-    const remaining = (currentTotal + previousDebt) - paid;
+    const remaining = Math.max(0, grandTotal - paid);
+
+    const itemGroups = groupRetailItemsByAddedAt(inv.items, inv.date);
+    const paymentsHistory = computeRetailPaymentsHistory(inv, grandTotal);
+
+    const printItemsRows = (items) => items.map(item => `
+                        <tr>
+                            <td>${item.productName}</td>
+                            <td>${item.size}</td>
+                            <td>${item.qty}</td>
+                            <td>${Number(item.subtotal).toFixed(2)}</td>
+                        </tr>
+    `).join('');
+
+    const printItemsHtml = itemGroups.length > 1
+        ? itemGroups.map(group => `
+                        <tr>
+                            <td colspan="4" style="background:#FEF3C7; text-align:right; font-weight:600; color:#92400E;">
+                                🕒 أُضيف بتاريخ: ${formatRetailDateTime(group.date)}
+                            </td>
+                        </tr>
+                        ${printItemsRows(group.items)}
+        `).join('')
+        : printItemsRows(inv.items);
 
     const html = `
         <html dir="rtl" lang="ar">
@@ -2529,6 +3084,7 @@ window.printRetailSavedInvoice = function(index) {
                     padding: 30px; 
                     line-height: 1.6;
                     background: #f9fafb;
+                    font-size: 20px;
                 }
                 .header {
                     text-align: center;
@@ -2536,8 +3092,11 @@ window.printRetailSavedInvoice = function(index) {
                     border-bottom: 4px solid #14B8A6;
                     padding-bottom: 15px;
                 }
+                .header p {
+                    font-size: 17px;
+                }
                 .shop-name {
-                    font-size: 28px;
+                    font-size: 25px;
                     font-weight: bold;
                     color: #14B8A6;
                 }
@@ -2548,13 +3107,14 @@ window.printRetailSavedInvoice = function(index) {
                 }
                 th, td {
                     border: 1px solid #333;
-                    padding: 12px;
+                    padding: 10px;
                     text-align: center;
                 }
                 th {
                     background-color: #F0FDFA;
                     font-weight: 600;
                     color: #0F766E;
+                    font-size: 17px;
                 }
                 .totals {
                     margin-top: 30px;
@@ -2569,8 +3129,11 @@ window.printRetailSavedInvoice = function(index) {
                     border-radius: 8px;
                     background: white;
                 }
+                .total-box h3 {
+                    font-size: 17px;
+                }
                 .amount {
-                    font-size: 22px;
+                    font-size: 19px;
                     font-weight: bold;
                 }
                 .red { color: #dc2626; }
@@ -2589,7 +3152,7 @@ window.printRetailSavedInvoice = function(index) {
                 <p>رقم الفاتورة: #${index + 1} &nbsp;&nbsp;&nbsp; التاريخ: ${formattedDate} - ${formattedTime}</p>
             </div>
 
-            <div style="margin-bottom: 20px; font-size: 18px;">
+            <div style="margin-bottom: 20px; font-size: 17px;">
                 <strong>اسم العميل:</strong> ${inv.customer}
                 ${previousDebt > 0 ? `<span style="color:#dc2626;"> (عليه ${previousDebt.toFixed(2)} جنيه سابقًا)</span>` : ''}
             </div>
@@ -2599,28 +3162,40 @@ window.printRetailSavedInvoice = function(index) {
                     <tr>
                         <th>المنتج</th>
                         <th>المقاس</th>
-                        <th>السعر</th>
                         <th>الكمية</th>
                         <th>الإجمالي</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${inv.items.map(item => `
+                    ${printItemsHtml}
+                </tbody>
+            </table>
+
+            ${paymentsHistory.length > 0 ? `
+            <table>
+                <thead>
+                    <tr>
+                        <th>تاريخ الدفعة</th>
+                        <th>المبلغ المدفوع</th>
+                        <th>المتبقي بعد الدفعة</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${paymentsHistory.map(p => `
                         <tr>
-                            <td>${item.productName}</td>
-                            <td>${item.size}</td>
-                            <td>${Number(item.price).toFixed(2)}</td>
-                            <td>${item.qty}</td>
-                            <td>${Number(item.subtotal).toFixed(2)}</td>
+                            <td>${formatRetailDateTime(p.date)}</td>
+                            <td class="green">${p.amount.toFixed(2)} جنيه</td>
+                            <td class="${p.remainingAfter > 0 ? 'red' : 'green'}">${p.remainingAfter.toFixed(2)} جنيه</td>
                         </tr>
                     `).join('')}
                 </tbody>
             </table>
+            ` : ''}
 
             <div class="totals">
                 <div class="total-box">
-                    <h3 style="color:#14B8A6;">إجمالي الفاتورة الجديدة</h3>
-                    <div class="amount emerald">${currentTotal.toFixed(2)} جنيه</div>
+                    <h3 style="color:#14B8A6;">إجمالي الفاتورة</h3>
+                    <div class="amount emerald">${grandTotal.toFixed(2)} جنيه</div>
                 </div>
                 <div class="total-box">
                     <h3 style="color:#16a34a;">المبلغ المدفوع</h3>
@@ -2634,7 +3209,7 @@ window.printRetailSavedInvoice = function(index) {
                 </div>
             </div>
 
-            <div style="margin-top: 50px; text-align: center; color: #666; font-size: 16px;">
+            <div style="margin-top: 50px; text-align: center; color: #666; font-size: 13px;">
                 شكرًا لتعاملك مع مصطفى الازهرى للادوات الصحية<br>
                 برجاء الاحتفاظ بالفاتورة <br>
                 للاستفساراتصل على : 01002908735 او 01119032231
@@ -2748,10 +3323,21 @@ function clearRetailInvoice() {
     if (confirm('هل تريد مسح الفاتورة القطاعية؟')) {
         retailInvoice = [];
         retailStaging = [];
+        editingRetailInvoiceIndex = null;
+        retailSessionAddedAt = Date.now();
+        const paidInput = document.getElementById('retail-paid-input');
+        if (paidInput) {
+            paidInput.readOnly = false;
+            paidInput.classList.remove('opacity-60', 'cursor-not-allowed');
+            paidInput.title = '';
+        }
         renderRetailTable();
         renderRetailStaging();
         renderRetailPercentGroups();
         updateRetailTotalAndRemaining();
+
+        const cancelBtn = document.getElementById('cancel-edit-retail-btn');
+        if (cancelBtn) cancelBtn.classList.add('hidden');
     }
 }
 
@@ -2819,8 +3405,12 @@ function addToRetailInvoice() {
 
         renderRetailStaging();
 
-        // تصفير الكمية بس
+        // تصفير خانة المنتج والمقاس والكمية بعد الإضافة، عشان يبقى سهل تختار منتج جديد
         if (qtyInput) qtyInput.value = 1;
+        const productInputStaging = document.getElementById('retail-product-search');
+        if (productInputStaging) productInputStaging.value = '';
+        const sizeSelectStaging = document.getElementById('retail-size-select');
+        if (sizeSelectStaging) sizeSelectStaging.innerHTML = '<option value="">اختر المقاس...</option>';
 
         console.log(`تم إضافة ${product.name} للقائمة المؤقتة`);
         return;
@@ -2847,7 +3437,8 @@ function addToRetailInvoice() {
         basePrice: variant.price,
         price: finalPrice,
         qty: qty,
-        subtotal: finalPrice * qty
+        subtotal: finalPrice * qty,
+        addedAt: retailSessionAddedAt
     });
 
     renderRetailTable();
@@ -2855,6 +3446,12 @@ function addToRetailInvoice() {
 
     // تصفير الكمية
     if (qtyInput) qtyInput.value = 1;
+
+    // تصفير خانة المنتج والمقاس بعد الإضافة، عشان يبقى سهل تختار منتج جديد
+    const productInputAfterAdd = document.getElementById('retail-product-search');
+    if (productInputAfterAdd) productInputAfterAdd.value = '';
+    const sizeSelectAfterAdd = document.getElementById('retail-size-select');
+    if (sizeSelectAfterAdd) sizeSelectAfterAdd.innerHTML = '<option value="">اختر المقاس...</option>';
 
     // تصفير التعديل بعد الإضافة، ولازم يتحط تاني قبل المنتج الجاي
     retailPriceAdjustment = 0;
