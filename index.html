@@ -13,179 +13,425 @@
                 extend: {
                     fontFamily: { sans: ['Cairo', 'sans-serif'] },
                     colors: {
-                        // Primary — #1E3A5F
-                        brand: {
-                            50: '#F4F5F7', 100: '#E4E7EC', 200: '#C4CCD5', 300: '#A0ACBC',
-                            400: '#78899F', 500: '#4B617F', 600: '#1E3A5F', 700: '#182E4C',
-                            800: '#13253D', 900: '#0F1D30'
+                        bg:      '#F6F7FB',
+                        surface: '#FFFFFF',
+                        line:    '#E6E8F0',
+                        ink: {
+                            900: '#1E2233', 800: '#2C3145', 700: '#414765',
+                            600: '#5B6180', 500: '#767C99', 400: '#9096B0', 300: '#B6BCD1'
                         },
-                        // Secondary — #2563EB
-                        secondary: {
-                            50: '#EFF4FE', 100: '#DBE6FC', 200: '#B4CBF9', 300: '#83A8F4',
-                            400: '#4D7CEE', 500: '#2563EB', 600: '#1D4FBE', 700: '#173E93',
-                            800: '#122F70', 900: '#0E2456'
+                        primary: {
+                            50: '#F1EFFE', 100: '#E4E0FD', 200: '#C9C2FA', 300: '#A99EF6',
+                            400: '#8A7BF0', 500: '#6D5CE7', 600: '#5B49DB', 700: '#4A3BC0',
+                            800: '#3B2F99', 900: '#2C2373'
                         },
-                        // Accent — #14B8A6 (replaces the previous rose/pink retail theme)
-                        rose: {
-                            50: '#F0FDFA', 100: '#CCFBF1', 200: '#99F6E4', 300: '#5EEAD4',
-                            400: '#2DD4BF', 500: '#14B8A6', 600: '#0D9488', 700: '#0F766E',
-                            800: '#115E59', 900: '#134E4A'
+                        accent: {
+                            50: '#F5F3FF', 100: '#EDE9FE', 200: '#DDD6FE', 300: '#C4B5FD',
+                            400: '#A78BFA', 500: '#8B5CF6', 600: '#7C3AED', 700: '#6D28D9',
+                            800: '#5B21B6', 900: '#4C1D95'
                         },
-                        // Success — #16A34A
-                        emerald: {
-                            50: '#F0FDF4', 100: '#DCFCE7', 200: '#BBF7D0', 300: '#86EFAC',
-                            400: '#4ADE80', 500: '#22C55E', 600: '#16A34A', 700: '#15803D',
-                            800: '#166534', 900: '#14532D'
-                        }
-                        // slate (Background/Cards/Border/Text), amber (Warning #F59E0B) and red
-                        // (Error #DC2626) are no longer overridden here — Tailwind's built-in
-                        // defaults already match the requested palette exactly:
-                        // slate-100 = #F1F5F9 (Background), slate-300 = #CBD5E1 (Border),
-                        // slate-900 = #0F172A (Text), amber-500 = #F59E0B, red-600 = #DC2626
+                        success: { 50: '#ECFDF5', 100: '#D1FAE5', 500: '#10B981', 600: '#059669', 700: '#047857' },
+                        danger:  { 50: '#FEF2F2', 100: '#FEE2E2', 500: '#EF4444', 600: '#DC2626', 700: '#B91C1C' }
                     },
+                    borderRadius: { DEFAULT: '6px', md: '6px', lg: '8px', xl: '10px', '2xl': '12px' },
                     boxShadow: {
-                        'soft': '0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px 0 rgb(15 23 42 / 0.06)',
-                        'card': '0 1px 3px 0 rgb(15 23 42 / 0.06), 0 4px 12px -2px rgb(15 23 42 / 0.06)',
-                        'lifted': '0 8px 24px -6px rgb(15 23 42 / 0.12)'
+                        soft: '0 1px 2px rgb(30 34 51 / 0.04)',
+                        card: '0 1px 2px rgb(30 34 51 / 0.04), 0 1px 3px rgb(30 34 51 / 0.03)',
+                        lifted: '0 12px 32px -12px rgb(30 34 51 / 0.18)'
                     }
                 }
             }
         };
     </script>
 
-    <!-- ==================== نظام التصميم الموحد (Design System) ==================== -->
+    <!-- ==================== نظام التصميم (Design System) ==================== -->
     <style type="text/tailwindcss">
         :root {
-            --brand: #1E3A5F;
-            --brand-dark: #182E4C;
-            --ink: #0F172A;
+            --bg: #F6F7FB;
             --surface: #FFFFFF;
-            --bg: #F1F5F9;
-            --accent: #14B8A6;
-            --secondary: #2563EB;
-            --border-c: #CBD5E1;
-            --success: #16A34A;
-            --error: #DC2626;
-            --warning: #F59E0B;
+            --line: #E6E8F0;
+            --line-strong: #D5D9E6;
+            --ink-900: #1E2233;
+            --ink-700: #414765;
+            --ink-600: #5B6180;
+            --ink-400: #9096B0;
+            --ink-300: #B6BCD1;
+            --primary: #6D5CE7;
+            --primary-dark: #5B49DB;
+            --accent: #8B5CF6;
+            --accent-soft: #F5F3FF;
+            --success: #10B981;
+            --danger: #EF4444;
+            --radius: 8px;
+            --radius-sm: 6px;
         }
 
         html { scroll-behavior: smooth; }
+        html, body { scrollbar-gutter: stable; }
 
         body {
             font-family: 'Cairo', sans-serif;
             background: var(--bg);
-            color: var(--ink);
-            font-size: 15px;
-            line-height: 1.65;
+            color: var(--ink-900);
+            font-size: 14px;
+            line-height: 1.6;
             -webkit-font-smoothing: antialiased;
+            letter-spacing: -0.005em;
         }
 
-        h1, h2, h3, h4 { letter-spacing: -0.01em; }
-
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar { width: 9px; height: 9px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        ::-webkit-scrollbar-thumb { background: #D3D7E6; border-radius: 99px; }
+        ::-webkit-scrollbar-thumb:hover { background: #B9BFD6; }
 
         button, input, select { -webkit-tap-highlight-color: transparent; }
-        button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
-            outline: 2px solid var(--brand);
+        button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible {
+            outline: 2px solid var(--accent);
             outline-offset: 2px;
         }
 
-        /* ---------- Buttons ---------- */
+        .tabular { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+        .unit { font-size: 0.72em; font-weight: 600; color: var(--ink-400); }
+
+        /* ================= الهيكل العام ================= */
+        .app-shell { display: flex; min-height: 100vh; }
+
+        .sidebar {
+            width: 244px; flex-shrink: 0; background: var(--surface);
+            border-left: 1px solid var(--line);
+            display: none; flex-direction: column; position: sticky; top: 0; height: 100vh;
+        }
+        @media (min-width: 1024px) { .sidebar { display: flex; } }
+
+        .sidebar-brand {
+            padding: 18px 20px 16px; border-bottom: 1px solid var(--line);
+        }
+        .brand-name { font-size: 15px; font-weight: 700; color: var(--ink-900); line-height: 1.35; }
+        .brand-sub { font-size: 11px; color: var(--ink-400); letter-spacing: .04em; margin-top: 2px; }
+
+        .nav-group-label {
+            font-size: 10.5px; font-weight: 700; color: var(--ink-400);
+            letter-spacing: .09em; padding: 0 12px; margin: 18px 0 6px;
+        }
+        .nav-item {
+            display: flex; align-items: center; gap: 10px; width: 100%;
+            padding: 8px 12px; border-radius: var(--radius-sm);
+            font-size: 13.5px; font-weight: 500; color: var(--ink-600);
+            transition: background-color .14s ease, color .14s ease; text-align: right;
+        }
+        .nav-item:hover { background: #F1F2F9; color: var(--ink-900); }
+        .nav-item.nav-active {
+            background: linear-gradient(135deg, #7C6BEE 0%, #6D5CE7 55%, #5B49DB 100%);
+            color: #fff; font-weight: 600;
+            box-shadow: 0 6px 16px -8px rgb(109 92 231 / .65);
+        }
+        .nav-item.nav-active svg { color: #fff; }
+        .nav-item svg { color: var(--ink-400); flex-shrink: 0; }
+        .nav-item:hover svg { color: var(--ink-700); }
+        .nav-badge {
+            margin-inline-start: auto; font-size: 11px; font-weight: 700;
+            background: var(--danger); color: #fff; border-radius: 99px; padding: 0 6px; min-width: 18px; text-align: center;
+        }
+
+        .app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+        .topbar {
+            height: 52px; background: var(--surface); border-bottom: 1px solid var(--line);
+            display: flex; align-items: center; gap: 10px; padding: 0 14px;
+            position: sticky; top: 0; z-index: 30;
+        }
+
+        .page-head {
+            display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+            padding: 20px 16px 14px; border-bottom: 1px solid var(--line); background: var(--bg);
+        }
+        @media (min-width: 640px) { .page-head { padding: 24px 28px 16px; } }
+        .page-title { font-size: 19px; font-weight: 700; color: var(--ink-900); line-height: 1.3; }
+        .page-subtitle { font-size: 12.5px; color: var(--ink-400); margin-top: 2px; }
+
+        .main-scroll { flex: 1; padding: 16px; overflow-x: hidden; }
+        @media (min-width: 640px) { .main-scroll { padding: 20px 28px 48px; } }
+
+        .mobile-nav {
+            position: fixed; inset: 0; z-index: 60; background: rgb(30 34 51 / .45);
+            backdrop-filter: blur(2px);
+        }
+        .mobile-nav-panel {
+            width: 268px; max-width: 84vw; height: 100%; background: var(--surface);
+            border-left: 1px solid var(--line); padding: 14px; overflow-y: auto;
+            animation: slideIn .2s ease;
+        }
+        @keyframes slideIn { from { transform: translateX(28px); opacity: .6; } to { transform: none; opacity: 1; } }
+
+        /* ================= الأزرار ================= */
         .btn {
-            @apply inline-flex items-center justify-center gap-2 rounded-xl font-semibold text-sm sm:text-base px-5 py-3 transition-all duration-150 select-none active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none disabled:active:scale-100;
+            @apply inline-flex items-center justify-center gap-2 font-semibold transition-colors duration-150 select-none;
+            font-size: 13.5px; padding: 8px 14px; border-radius: var(--radius-sm); line-height: 1.4;
         }
-        .btn-primary { @apply btn bg-brand-600 text-white shadow-soft hover:bg-brand-700; }
-        .btn-secondary { @apply btn bg-white text-slate-700 border border-slate-300 hover:bg-slate-50; }
-        .btn-success { @apply btn bg-emerald-600 text-white shadow-soft hover:bg-emerald-700; }
-        .btn-warning { @apply btn bg-amber-500 text-white shadow-soft hover:bg-amber-600; }
-        .btn-danger  { @apply btn bg-red-50 text-red-700 hover:bg-red-100; }
-        .btn-ghost   { @apply btn bg-transparent text-slate-500 hover:bg-slate-100 hover:text-slate-700; }
-        .btn-rose    { @apply btn bg-rose-600 text-white shadow-soft hover:bg-rose-700; }
+        .btn:disabled { opacity: .5; pointer-events: none; }
+        .btn-primary { @apply btn; background: linear-gradient(135deg, #7C6BEE, #5B49DB); color: #fff; }
+        .btn-primary:hover { background: linear-gradient(135deg, #6D5CE7, #4A3BC0); }
+        .btn-accent { @apply btn; background: var(--accent); color: #fff; }
+        .btn-accent:hover { background: #7C3AED; }
+        .btn-secondary { @apply btn; background: var(--surface); color: var(--ink-700); border: 1px solid var(--line-strong); }
+        .btn-secondary:hover { background: #F4F5FB; color: var(--ink-900); }
+        .btn-tertiary { @apply btn; background: transparent; color: var(--ink-600); }
+        .btn-tertiary:hover { background: #EEF0F8; color: var(--ink-900); }
+        .btn-danger { @apply btn; background: transparent; color: var(--danger); border: 1px solid #FBD5D5; }
+        .btn-danger:hover { background: #FEF2F2; }
+        .btn-success { @apply btn; background: var(--success); color: #fff; }
+        .btn-success:hover { background: #059669; }
+        .btn-warning { @apply btn; background: var(--accent); color: #fff; }
+        .btn-ghost   { @apply btn; background: transparent; color: var(--ink-500, #767C99); }
+        .btn-ghost:hover { background: #EEF0F8; }
+        .btn-rose    { @apply btn; background: var(--primary); color: #fff; }
+        .btn-rose:hover { background: var(--primary-dark); }
 
-        /* ---------- Surfaces ---------- */
-        .card { @apply bg-white rounded-2xl border border-slate-200/80 shadow-soft; }
-        .card-pad { @apply card p-4 sm:p-6; }
+        .icon-btn {
+            @apply inline-flex items-center justify-center transition-colors;
+            width: 30px; height: 30px; border-radius: var(--radius-sm); color: var(--ink-400);
+        }
+        .icon-btn:hover { background: #EEF0F8; color: var(--ink-900); }
+        .icon-btn-sm {
+            @apply inline-flex items-center justify-center transition-colors;
+            width: 26px; height: 26px; border-radius: 5px; color: var(--ink-300);
+        }
+        .icon-btn-sm:hover { background: #EEF0F8; color: var(--ink-700); }
 
-        /* ---------- Form elements ---------- */
-        .field-label { @apply block text-sm font-semibold text-slate-600 mb-2; }
+        /* ================= الأسطح ================= */
+        .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+        .panel-head {
+            display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+            padding: 14px 16px; border-bottom: 1px solid var(--line);
+        }
+        .panel-title { font-size: 14px; font-weight: 700; color: var(--ink-900); }
+        .panel-sub { font-size: 11.5px; color: var(--ink-400); margin-top: 1px; }
+        .panel-body { padding: 16px; }
+        .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+        .card-pad { @apply card; padding: 16px; }
+        @media (min-width: 640px) { .card-pad { padding: 20px; } }
+
+        /* ================= مؤشرات الأداء ================= */
+        .kpi {
+            background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+            padding: 14px; display: flex; align-items: flex-start; gap: 11px;
+        }
+        .kpi-icon {
+            width: 32px; height: 32px; border-radius: var(--radius-sm); flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            background: #F1F2F9; color: var(--ink-600);
+        }
+        .tone-accent { background: var(--accent-soft); color: var(--accent); }
+        .tone-success { background: #ECFDF5; color: var(--success); }
+        .tone-danger { background: #FEF2F2; color: var(--danger); }
+        .tone-primary { background: #F1EFFE; color: var(--primary); }
+        .kpi-label { font-size: 11.5px; color: var(--ink-400); font-weight: 600; }
+        .kpi-value { font-size: 19px; font-weight: 700; color: var(--ink-900); line-height: 1.3; margin-top: 1px; }
+        .kpi-sub { font-size: 11px; color: var(--ink-400); margin-top: 2px; }
+
+        /* ================= الجداول ================= */
+        .table-wrap { overflow-x: auto; }
+        .data-table { width: 100%; border-collapse: collapse; text-align: right; }
+        .data-table thead th {
+            font-size: 11px; font-weight: 700; color: var(--ink-400); letter-spacing: .04em;
+            padding: 10px 14px; background: #F8F9FD; border-bottom: 1px solid var(--line); white-space: nowrap;
+        }
+        .data-table tbody tr { border-bottom: 1px solid #EDEFF7; transition: background-color .12s ease; }
+        .data-table tbody tr:last-child { border-bottom: 0; }
+        .data-table tbody tr.row { cursor: pointer; }
+        .data-table tbody tr:hover { background: #F8F9FD; }
+        .data-table .cell, .data-table .cell-main { padding: 11px 14px; font-size: 13.5px; color: var(--ink-700); }
+        .data-table.compact .cell { padding: 8px 12px; font-size: 13px; }
+        .table-foot {
+            padding: 10px 16px; border-top: 1px solid var(--line);
+            font-size: 11.5px; color: var(--ink-400); background: #F8F9FD;
+        }
+        .table-modern { width: 100%; border-collapse: collapse; text-align: right; }
+        .table-modern thead th {
+            font-size: 11px; font-weight: 700; color: var(--ink-400); letter-spacing: .04em;
+            padding: 10px 14px; background: #F8F9FD; border-bottom: 1px solid var(--line);
+        }
+        .table-modern tbody tr { border-bottom: 1px solid #EDEFF7; }
+        .table-modern tbody td { padding: 11px 14px; color: var(--ink-700); }
+        @media (max-width: 640px) { .hide-sm { display: none; } }
+        @media (max-width: 860px) { .hide-md { display: none; } }
+
+        /* ================= الحالات ================= */
+        .status-pill {
+            display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+            padding: 2.5px 9px; border-radius: 99px; white-space: nowrap;
+        }
+        .status-pill::before { content: ''; width: 5px; height: 5px; border-radius: 99px; background: currentColor; }
+        .status-ok { background: #ECFDF5; color: var(--success); }
+        .status-low { background: var(--accent-soft); color: #7C3AED; }
+        .status-out { background: #FEF2F2; color: var(--danger); }
+        .status-muted { background: #EEF0F8; color: var(--ink-400); }
+        .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2.5px 9px; border-radius: 99px; font-size: 11px; font-weight: 600; background: #EEF0F8; color: var(--ink-600); }
+        .tag { display: inline-flex; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: #F1EFFE; color: var(--primary); }
+
+        /* ================= النماذج ================= */
+        .field-label { display: block; font-size: 12px; font-weight: 600; color: var(--ink-600); margin-bottom: 6px; }
         .input-base {
-            @apply w-full px-4 py-3 rounded-xl border border-slate-300 bg-white text-[15px] text-slate-800
-                   placeholder:text-slate-400 outline-none transition-colors
-                   focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10;
+            width: 100%; padding: 8px 12px; border-radius: var(--radius-sm);
+            border: 1px solid var(--line-strong); background: var(--surface);
+            font-size: 13.5px; color: var(--ink-900); font-family: inherit;
+            transition: border-color .14s ease, box-shadow .14s ease; outline: none;
         }
-        select.input-base { @apply appearance-none bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22%2394a3b8%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20d%3D%22M5.23%207.21a.75.75%200%20011.06.02L10%2011.168l3.71-3.938a.75.75%200%20111.08%201.04l-4.25%204.5a.75.75%200%2001-1.08%200l-4.25-4.5a.75.75%200%2001.02-1.06z%22%20clip-rule%3D%22evenodd%22%2F%3E%3C%2Fsvg%3E')] bg-no-repeat bg-[left_0.9rem_center] pl-9; }
-
-        /* ---------- Badges / chips ---------- */
-        .badge { @apply inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold; }
+        .input-base::placeholder { color: var(--ink-300); }
+        .input-base:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(139 92 246 / .14); }
+        .input-base:disabled, .input-base[readonly] { background: #F8F9FD; color: var(--ink-600); }
+        select.input-base {
+            appearance: none; padding-left: 30px;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239096B0' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: left 10px center; background-size: 14px;
+        }
         .chip {
-            @apply inline-flex items-center px-4 py-2 rounded-full text-sm font-medium border border-slate-300 bg-white text-slate-600
-                   hover:border-brand-400 hover:text-brand-700 transition-colors cursor-pointer whitespace-nowrap;
+            display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 99px;
+            font-size: 12.5px; font-weight: 600; border: 1px solid var(--line-strong);
+            background: var(--surface); color: var(--ink-600); cursor: pointer; white-space: nowrap;
+            transition: all .14s ease;
         }
-        .chip.chip-active { @apply bg-brand-600 border-brand-600 text-white hover:text-white; }
+        .chip:hover { border-color: var(--accent); color: var(--ink-900); }
+        .chip.chip-active { background: var(--primary); border-color: var(--primary); color: #fff; }
         .chip-rose { @apply chip; }
-        .chip-rose.chip-active { @apply bg-rose-600 border-rose-600 text-white; }
+        .chip-rose.chip-active { background: var(--primary); border-color: var(--primary); color: #fff; }
 
-        /* ---------- Tables ---------- */
-        .table-modern { @apply w-full text-right border-collapse; }
-        .table-modern thead th { @apply px-4 py-3 text-xs sm:text-sm font-bold text-slate-500 uppercase tracking-wide bg-slate-50; }
-        .table-modern tbody tr { @apply border-b border-slate-100 hover:bg-slate-50/70 transition-colors; }
-        .table-modern tbody td { @apply px-4 py-3 text-slate-700; }
+        /* ================= القوائم المنسدلة ================= */
+        .menu {
+            position: absolute; left: 0; top: calc(100% + 4px); z-index: 40; min-width: 184px;
+            background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+            box-shadow: 0 8px 24px -10px rgb(30 34 51 / .22); padding: 4px; text-align: right;
+        }
+        .menu button {
+            display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 10px;
+            border-radius: 5px; font-size: 13px; font-weight: 500; color: var(--ink-700); text-align: right;
+        }
+        .menu button:hover { background: #F1F2F9; }
+        .menu button svg { color: var(--ink-400); }
+        .menu .menu-danger { color: var(--danger); }
+        .menu .menu-danger svg { color: var(--danger); }
+        .menu .menu-danger:hover { background: #FEF2F2; }
 
-        /* ---------- Nav tabs (JS toggles: border-b-4 border-blue-600 text-blue-600 / border-green-600 text-green-600) ---------- */
+        /* ================= الدرج الجانبي ================= */
+        .drawer { position: fixed; inset: 0; z-index: 70; }
+        .drawer-backdrop {
+            position: absolute; inset: 0; background: rgb(30 34 51 / .35);
+            opacity: 0; transition: opacity .2s ease;
+        }
+        .drawer-panel {
+            position: absolute; top: 0; bottom: 0; left: 0; width: 520px; max-width: 100%;
+            background: var(--surface); border-right: 1px solid var(--line);
+            display: flex; flex-direction: column;
+            transform: translateX(-16px); opacity: 0; transition: transform .2s ease, opacity .2s ease;
+        }
+        .drawer-open .drawer-backdrop { opacity: 1; }
+        .drawer-open .drawer-panel { transform: none; opacity: 1; }
+        .drawer-head {
+            padding: 16px 18px; border-bottom: 1px solid var(--line);
+            display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+        }
+        .drawer-body { flex: 1; overflow-y: auto; padding: 0 18px; }
+        .drawer-section-title { font-size: 12px; font-weight: 700; color: var(--ink-400); letter-spacing: .05em; margin-bottom: 10px; }
+        .drawer-actions {
+            display: flex; gap: 8px; padding: 14px 0 20px; border-top: 1px solid var(--line); margin-top: 4px;
+        }
+
+        /* ================= النوافذ ================= */
+        .modal { animation: modalIn .18s ease; }
+        @keyframes modalIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+        .modal-panel { max-height: 90vh; display: flex; flex-direction: column; border-radius: var(--radius) !important; }
+        .modal-body-scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+        /* ================= التنبيهات ================= */
+        .toast-host {
+            position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+            z-index: 90; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none;
+        }
+        .toast {
+            display: flex; align-items: center; gap: 9px; padding: 9px 14px; border-radius: var(--radius);
+            background: var(--ink-900); color: #fff; font-size: 13px; font-weight: 500;
+            box-shadow: 0 10px 28px -12px rgb(30 34 51 / .5);
+            opacity: 0; transform: translateY(8px); transition: opacity .2s ease, transform .2s ease;
+            max-width: 90vw;
+        }
+        .toast.toast-in { opacity: 1; transform: none; }
+        .toast-icon { display: inline-flex; }
+        .toast-success .toast-icon { color: #6EE7B7; }
+        .toast-error { background: var(--danger); }
+        .toast-warning { background: var(--accent); }
+
+        /* ================= الرسوم البيانية ================= */
+        .chart-grid { stroke: #EBEDF6; stroke-width: 1; }
+        .chart-label { font-size: 10px; fill: var(--ink-400); font-family: 'Cairo', sans-serif; }
+        .chart-dot { fill: var(--accent); }
+        .chart-point circle:first-child:hover + .chart-dot { r: 5; }
+        .chart-donut-value { font-size: 20px; font-weight: 700; fill: var(--ink-900); font-family: 'Cairo', sans-serif; }
+
+        /* ================= حالات فارغة ================= */
+        .empty-state {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            text-align: center; padding: 48px 24px; color: var(--ink-400);
+        }
+        .section-title { font-size: 16px; font-weight: 700; color: var(--ink-900); }
+        .section-sub { font-size: 12px; color: var(--ink-400); margin-top: 2px; }
+        .stat-card { @apply card-pad; display: flex; align-items: center; gap: 12px; }
+        .stat-icon { width: 34px; height: 34px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; background: #F1F2F9; }
         .nav-tab {
-            @apply flex-1 min-w-[120px] py-3.5 sm:py-4 px-3 text-center font-bold text-sm sm:text-base
-                   border-b-[3px] border-transparent text-slate-400 whitespace-nowrap transition-all duration-150
-                   hover:text-slate-600 hover:bg-slate-50 flex items-center justify-center gap-2;
+            flex: 1; min-width: 110px; padding: 10px; text-align: center; font-size: 13px; font-weight: 600;
+            color: var(--ink-400); border-bottom: 2px solid transparent;
         }
-
-        /* ---------- Section heading ---------- */
-        .section-title { @apply text-xl sm:text-2xl font-extrabold text-slate-900; }
-        .section-sub { @apply text-sm text-slate-400 mt-1; }
-
-        /* ---------- Stat card ---------- */
-        .stat-card { @apply card-pad flex items-center gap-4; }
-        .stat-icon { @apply w-11 h-11 rounded-xl flex items-center justify-center text-xl shrink-0; }
-
-        /* ---------- Empty state ---------- */
-        .empty-state { @apply flex flex-col items-center justify-center text-center py-14 px-6 text-slate-400; }
-
-        html, body { scrollbar-gutter: stable; }
-
-        .modal {
-            animation: fadeIn 0.22s ease;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: scale(0.97) translateY(6px); }
-            to { opacity: 1; transform: scale(1) translateY(0); }
-        }
-        .modal-panel {
-            max-height: 92vh;
-            display: flex;
-            flex-direction: column;
-        }
-        .modal-body-scroll {
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-        .nav-scroll {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-            scrollbar-width: none;
-        }
+        .nav-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
         .nav-scroll::-webkit-scrollbar { display: none; }
-        @media (max-width: 400px) {
-            h1 { font-size: 1.1rem !important; }
+
+        /* ==========================================================================
+           طبقة توافق مؤقتة: بتحوّل ألوان الواجهة القديمة (أزرق/وردي/رمادي)
+           للبالتة الجديدة لحد ما باقي الأقسام تتعمل من الأول في المرحلة التانية.
+           ========================================================================== */
+        @media screen {
+            .bg-slate-100, .bg-gray-100, .bg-slate-50, .bg-gray-50 { background-color: #F8F9FD !important; }
+            .bg-gray-200 { background-color: #EEF0F8 !important; }
+            .bg-white { background-color: var(--surface) !important; }
+            .bg-brand-50, .bg-blue-50, .bg-secondary-50 { background-color: #F1EFFE !important; }
+            .bg-rose-50, .bg-amber-50, .bg-purple-50 { background-color: var(--accent-soft) !important; }
+            .bg-emerald-50, .bg-green-50 { background-color: #ECFDF5 !important; }
+            .bg-red-50 { background-color: #FEF2F2 !important; }
+
+            .text-blue-600, .text-blue-700, .text-brand-600, .text-brand-700, .text-brand-800,
+            .text-secondary-600, .text-purple-600, .text-indigo-600 { color: var(--primary) !important; }
+            .text-amber-600, .text-amber-700, .text-rose-600, .text-rose-700 { color: #7C3AED !important; }
+            .text-green-600, .text-green-700, .text-emerald-600, .text-emerald-700 { color: var(--success) !important; }
+            .text-red-500, .text-red-600, .text-red-700, .text-red-800 { color: var(--danger) !important; }
+            .text-slate-900, .text-gray-900, .text-slate-800, .text-gray-800 { color: var(--ink-900) !important; }
+            .text-slate-700, .text-gray-700, .text-slate-600, .text-gray-600 { color: var(--ink-700) !important; }
+            .text-slate-500, .text-gray-500, .text-slate-400, .text-gray-400 { color: var(--ink-400) !important; }
+
+            .bg-blue-600, .bg-brand-600, .bg-secondary-600 { background-color: var(--primary) !important; color: #fff !important; }
+            .bg-emerald-600, .bg-green-600 { background-color: var(--success) !important; }
+            .bg-rose-600, .bg-amber-500 { background-color: var(--accent) !important; }
+            .bg-red-600 { background-color: var(--danger) !important; }
+
+            .border-slate-100, .border-slate-200, .border-gray-100, .border-gray-200,
+            .border-blue-200, .border-rose-100, .border-purple-100, .border-amber-200,
+            .border-red-100, .border-emerald-100, .border-brand-100 { border-color: var(--line) !important; }
+
+            .rounded-2xl, .rounded-3xl { border-radius: var(--radius) !important; }
+            .rounded-xl { border-radius: var(--radius-sm) !important; }
+            .shadow-lg, .shadow-xl, .shadow-2xl, .shadow-lifted, .shadow-card { box-shadow: 0 8px 24px -14px rgb(30 34 51 / .22) !important; }
+            .shadow, .shadow-sm, .shadow-md, .shadow-soft { box-shadow: none !important; }
+
+            .underline { text-decoration: none !important; font-weight: 600; }
         }
+
+        @media (max-width: 400px) { h1 { font-size: 1rem !important; } }
+
         @media print {
-            .no-print { display: none !important; }
-            header, nav, #product-modal, #saved-invoices-section, #profit-modal, #bulk-price-modal, #company-manager-modal { display: none !important; }
+            .no-print, .sidebar, .topbar, .page-head, .toast-host { display: none !important; }
+            body { background: #fff; }
             table { border-collapse: collapse; width: 100%; }
             th, td { border: 1px solid #000 !important; padding: 8px !important; }
         }
     </style>
+
 </head>
 <body class="bg-slate-100 text-slate-900">
 
@@ -214,117 +460,135 @@
     </div>
 </div>
 
-<div id="app-root" class="hidden max-w-3xl sm:max-w-4xl lg:max-w-6xl mx-auto min-h-screen flex flex-col px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
+<div id="app-root" class="hidden app-shell">
 
-    <!-- Header -->
-    <header class="bg-white/90 backdrop-blur shadow-soft sticky top-0 z-50 rounded-2xl mb-3 border border-slate-200/70">
-        <div class="px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-3">
-            <div class="min-w-0 flex items-center gap-3">
-                <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-brand-600 text-white flex items-center justify-center text-lg sm:text-xl font-extrabold shrink-0 shadow-soft">م</div>
-                <div class="min-w-0">
-                    <h1 id="go-top" class="text-base sm:text-2xl font-extrabold text-slate-900 cursor-pointer truncate leading-tight">مصطفى الازهرى للادوات الصحية</h1>
-                    <p class="text-xs sm:text-sm text-slate-400 mt-0.5 hidden sm:block">نظام إدارة المنتجات والفواتير</p>
-                </div>
-            </div>
-            <button id="logout-btn" onclick="logoutUser()" class="btn-ghost !px-3 sm:!px-4 shrink-0" title="تسجيل الخروج">
-                <span>🚪</span><span class="hidden sm:inline">خروج</span>
-            </button>
-        </div>
-    </header>
-
-    <!-- Navigation -->
-    <nav class="bg-white border border-slate-200/70 shadow-soft rounded-2xl mb-4 overflow-hidden">
-        <div class="flex nav-scroll">
-            <button onclick="showSection('products')"
-                    id="btn-products"
-                    class="nav-tab border-b-4 border-blue-600 text-blue-600">
-                <span>🛍️</span><span>منتجاتنا</span>
-            </button>
-            <button onclick="showSection('invoice')"
-                    id="btn-invoice"
-                    class="nav-tab">
-                <span>📝</span><span>فواتير التجار</span>
-            </button>
-            <button onclick="showSection('retail')"
-                id="btn-retail"
-                class="nav-tab">
-                <span>🧾</span><span>فواتير قطاعي</span>
-            </button>
-        </div>
-    </nav>
-
-    <!-- Products Section -->
-    <div id="products-section" class="flex-1 overflow-auto">
-
-        <!-- إحصائيات سريعة -->
-        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 mb-4">
-            <div class="stat-card">
-                <div class="stat-icon bg-brand-50 text-brand-600">📦</div>
-                <div class="min-w-0">
-                    <div class="text-xs sm:text-sm text-slate-400 font-medium">إجمالي المنتجات</div>
-                    <div id="stat-products-count" class="text-xl sm:text-2xl font-extrabold text-slate-900">0</div>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon bg-emerald-50 text-emerald-600">📏</div>
-                <div class="min-w-0">
-                    <div class="text-xs sm:text-sm text-slate-400 font-medium">إجمالي المقاسات</div>
-                    <div id="stat-variants-count" class="text-xl sm:text-2xl font-extrabold text-slate-900">0</div>
-                </div>
-            </div>
-            <button onclick="openProfitModal()" class="stat-card text-right col-span-2 sm:col-span-1">
-                <div class="stat-icon bg-amber-50 text-amber-600">💰</div>
-                <div class="min-w-0">
-                    <div class="text-xs sm:text-sm text-slate-400 font-medium">المكسب</div>
-                    <div class="text-sm sm:text-base font-extrabold text-amber-600">عرض التفاصيل</div>
-                </div>
-            </button>
+    <!-- ==================== الشريط الجانبي ==================== -->
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-name">مصطفى الأزهرى</div>
+            <div class="brand-sub">للأدوات الصحية</div>
         </div>
 
-        <!-- تحذير الكمية القليلة -->
-        <div id="low-stock-alert" class="hidden mb-4">
-            <button onclick="toggleLowStockPanel()" type="button"
-                    class="w-full bg-red-50 border-2 border-red-200 text-red-700 rounded-2xl px-4 sm:px-5 py-3.5 flex items-center justify-between font-bold hover:bg-red-100 transition-colors">
-                <span class="flex items-center gap-2">⚠️ <span id="low-stock-count">0</span> مقاس وصل لحد التنبيه أو أقل</span>
-                <span class="text-sm">عرض التفاصيل ▾</span>
-            </button>
-            <div id="low-stock-panel" class="hidden mt-2 bg-white border border-red-100 rounded-2xl p-3 sm:p-4 space-y-2 max-h-72 overflow-auto"></div>
+        <nav class="flex-1 overflow-y-auto px-2.5 pb-4">
+            <div class="nav-group-label">عام</div>
+            <button type="button" data-nav="dashboard" onclick="showSection('dashboard')" class="nav-item" id="btn-dashboard"></button>
+
+            <div class="nav-group-label">المبيعات</div>
+            <button type="button" data-nav="retail" onclick="showSection('retail')" class="nav-item" id="btn-retail"></button>
+            <button type="button" data-nav="invoice" onclick="showSection('invoice')" class="nav-item" id="btn-invoice"></button>
+            <button type="button" data-nav="debts" onclick="showSection('debts')" class="nav-item" id="btn-debts"></button>
+
+            <div class="nav-group-label">المخزون</div>
+            <button type="button" data-nav="products" onclick="showSection('products')" class="nav-item" id="btn-products"></button>
+            <button type="button" onclick="openCameraScanModal()" class="nav-item" id="btn-scan-camera"></button>
+            <button type="button" onclick="openBulkPriceModal()" class="nav-item" id="btn-bulk-price"></button>
+            <button type="button" onclick="openCompanyManager()" class="nav-item" id="btn-companies"></button>
+
+            <div class="nav-group-label">الإدارة</div>
+            <button type="button" onclick="openProfitModal()" class="nav-item" id="btn-profit"></button>
+            <button type="button" data-nav="trash" onclick="showSection('trash')" class="nav-item" id="btn-trash"></button>
+        </nav>
+
+        <div class="p-2.5 border-t border-line">
+            <button type="button" onclick="logoutUser()" class="nav-item" id="btn-logout"></button>
         </div>
+    </aside>
 
-        <!-- شريط الأدوات -->
-        <div class="card-pad mb-4">
-            <div class="flex flex-col sm:flex-row gap-3 mb-5">
-                <button onclick="openAddProductModal()" class="btn-primary flex-1">
-                    <span>+</span><span>إضافة منتج</span>
-                </button>
-                <button onclick="openBulkPriceModal()" class="btn-warning flex-1">
-                    <span>✏️</span><span>تعديل الأسعار</span>
-                </button>
-            </div>
-
-            <div class="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3 mb-4">
-                <h2 class="section-title">قائمة المنتجات</h2>
-                <div class="relative w-full md:w-80">
-                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">🔍</span>
-                    <input id="product-search-box"
-                           type="text"
-                           placeholder="ابحث عن منتج..."
-                           class="input-base pr-11">
+    <!-- ==================== قائمة الموبايل ==================== -->
+    <div id="mobile-nav" class="hidden mobile-nav" onclick="if(event.target===this) closeMobileNav()">
+        <div class="mobile-nav-panel">
+            <div class="flex items-center justify-between mb-3 px-1">
+                <div>
+                    <div class="brand-name">مصطفى الأزهرى</div>
+                    <div class="brand-sub">للأدوات الصحية</div>
                 </div>
+                <button type="button" class="icon-btn" onclick="closeMobileNav()" id="btn-close-nav"></button>
             </div>
-
-            <!-- تصفية حسب الشركة -->
-            <div>
-                <div class="text-xs font-semibold text-slate-400 mb-2">تصفية حسب الشركة</div>
-                <div id="products-company-filter" class="flex flex-wrap gap-2 nav-scroll"></div>
-            </div>
+            <div id="mobile-nav-items"></div>
         </div>
-
-        <div id="products-list" class="space-y-5"></div>
     </div>
 
+    <!-- ==================== المحتوى ==================== -->
+    <div class="app-main">
+
+        <header class="topbar">
+            <button type="button" class="icon-btn lg:hidden" onclick="toggleMobileNav()" id="btn-open-nav"></button>
+            <div class="lg:hidden">
+                <div class="text-[13px] font-bold leading-tight">مصطفى الأزهرى</div>
+                <div class="text-[10px] text-ink-400 leading-tight">للأدوات الصحية</div>
+            </div>
+            <div class="flex-1"></div>
+            <button type="button" onclick="logoutUser()" class="btn-tertiary !px-2.5" title="تسجيل الخروج" id="btn-logout-top"></button>
+        </header>
+
+        <div class="page-head">
+            <div class="min-w-0">
+                <h1 id="page-title" class="page-title">لوحة المعلومات</h1>
+                <p id="page-subtitle" class="page-subtitle">نظرة عامة على المبيعات والمخزون</p>
+            </div>
+            <div id="page-actions" class="flex items-center gap-2"></div>
+        </div>
+
+        <main id="main-scroll" class="main-scroll">
+
+            <!-- ==================== لوحة المعلومات ==================== -->
+            <section id="dashboard-section">
+                <div id="dashboard-body"></div>
+            </section>
+
+            <!-- ==================== المخزون ==================== -->
+            <section id="products-section" class="hidden">
+
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                    <div class="kpi">
+                        <div class="kpi-icon tone-primary" id="ki-products"></div>
+                        <div><div class="kpi-label">المنتجات</div><div class="kpi-value tabular" id="stat-products-count">0</div></div>
+                    </div>
+                    <div class="kpi">
+                        <div class="kpi-icon" id="ki-variants"></div>
+                        <div><div class="kpi-label">المقاسات</div><div class="kpi-value tabular" id="stat-variants-count">0</div></div>
+                    </div>
+                    <div class="kpi">
+                        <div class="kpi-icon tone-accent" id="ki-units"></div>
+                        <div><div class="kpi-label">إجمالي القطع</div><div class="kpi-value tabular" id="stat-units-count">0</div></div>
+                    </div>
+                    <div class="kpi">
+                        <div class="kpi-icon tone-danger" id="ki-low"></div>
+                        <div><div class="kpi-label">تحتاج طلب</div><div class="kpi-value tabular" id="stat-low-count">0</div></div>
+                    </div>
+                </div>
+
+                <div id="low-stock-bar" class="hidden mb-4">
+                    <div class="flex items-center gap-2.5 px-3.5 py-2.5 rounded-[var(--radius-sm)] border border-[#EDE0CC] bg-[#F5F3FF]">
+                        <span class="text-[#7C3AED]" id="low-stock-icon"></span>
+                        <span class="text-[13px] text-ink-700 flex-1" id="low-stock-text"></span>
+                        <button type="button" onclick="setProductStockFilter('low')" class="btn-tertiary !py-1 !px-2.5 text-[12.5px]">عرض</button>
+                    </div>
+                </div>
+
+                <div class="panel mb-4">
+                    <div class="p-3 flex items-center gap-2.5 flex-wrap">
+                        <div class="relative flex-1 min-w-[190px]">
+                            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-ink-300" id="search-icon-slot"></span>
+                            <input id="product-search-box" type="text" placeholder="البحث عن منتج..." class="input-base pr-9">
+                        </div>
+                        <select id="products-company-filter" class="input-base w-auto min-w-[150px]">
+                            <option value="">كل الشركات</option>
+                        </select>
+                        <div class="flex items-center gap-1.5">
+                            <button type="button" data-stock-filter="ok" onclick="setProductStockFilter('ok')" class="chip">متاح</button>
+                            <button type="button" data-stock-filter="low" onclick="setProductStockFilter('low')" class="chip">منخفض <span id="chip-low-count" class="tabular">0</span></button>
+                            <button type="button" data-stock-filter="out" onclick="setProductStockFilter('out')" class="chip">نفد</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="products-list"></div>
+            </section>
+
+
     <!-- Invoice Section -->
-    <div id="invoice-section" class="flex-1 overflow-auto hidden">
+    <div id="invoice-section" class="hidden">
 
         <!-- بيانات الفاتورة -->
         <div class="card-pad mb-4">
@@ -338,6 +602,32 @@
                     class="input-base"
                     oninput="updateInvoiceHeader()">
                 <datalist id="customers-datalist"></datalist>
+            </div>
+
+            <!-- اختيار الشركة -->
+            <div class="mb-4">
+                <label class="field-label">اختر الشركة</label>
+                <select id="invoice-company-filter"
+                        onchange="handleInvoiceCompanyChange()"
+                        class="input-base">
+                    <option value="">كل الشركات</option>
+                </select>
+                <p class="text-xs text-slate-400 mt-1">لو نفس اسم المنتج موجود عند أكتر من شركة بسعر مختلف، اختار الشركة الأول عشان السعر ياخد بالظبط.</p>
+            </div>
+
+            <!-- بحث أو مسح كود QR -->
+            <div class="mb-4">
+                <label class="field-label">مسح سريع (QR)</label>
+                <div class="relative">
+                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-ink-300" data-icon="scan"></span>
+                    <input id="invoice-scan-input" type="text" placeholder="امسحي الكود أو اكتبيه ثم اضغطي Enter"
+                           class="input-base pr-9 pl-9" autocomplete="off"
+                           onkeydown="handleScanInput(event, 'invoice')">
+                    <button type="button" onclick="openCameraScanModal('invoice')"
+                            class="absolute left-1.5 top-1/2 -translate-y-1/2 icon-btn-sm" title="مسح بالكاميرا">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3.5"/></svg>
+                    </button>
+                </div>
             </div>
 
             <!-- اختيار المنتج + المقاس + الكمية -->
@@ -404,6 +694,7 @@
                     <thead>
                         <tr>
                             <th class="text-right">المنتج</th>
+                            <th class="no-print">الشركة</th>
                             <th>المقاس</th>
                             <th>السعر</th>
                             <th>الكمية</th>
@@ -423,7 +714,7 @@
 
         <!-- === المبالغ النهائية === -->
         <div class="card-pad mb-4">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-5">
 
                 <!-- المبلغ المدفوع -->
                 <div>
@@ -436,6 +727,19 @@
                                class="input-base text-xl font-bold text-center">
                         <span class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-medium">جنيه</span>
                     </div>
+                </div>
+
+                <!-- خصم على الفاتورة -->
+                <div>
+                    <label class="field-label" title="مبلغ بتنزله من إجمالي الفاتورة (مثلاً لتقريب الرقم)، من غير ما يأثر على حساب المكسب">
+                        خصم على الفاتورة
+                    </label>
+                    <input id="discount-input"
+                           type="number"
+                           min="0"
+                           value="0"
+                           oninput="updateTotalAndRemaining()"
+                           class="input-base text-xl font-bold text-center">
                 </div>
 
                 <!-- الإجمالي -->
@@ -481,7 +785,7 @@
     </div>
 
     <!-- ==================== قسم فواتير قطاعي ==================== -->
-    <div id="retail-section" class="flex-1 overflow-auto hidden">
+    <div id="retail-section" class="hidden">
 
         <!-- بيانات الفاتورة القطاعية -->
         <div class="bg-white rounded-2xl shadow-soft p-4 sm:p-6 mb-4 border border-rose-100">
@@ -510,6 +814,21 @@
                         class="input-base focus:border-rose-500 focus:ring-rose-500/10">
                     <option value="">كل الشركات</option>
                 </select>
+            </div>
+
+            <!-- بحث أو مسح كود QR -->
+            <div class="mb-4">
+                <label class="field-label">مسح سريع (QR)</label>
+                <div class="relative">
+                    <span class="absolute right-3 top-1/2 -translate-y-1/2 text-ink-300" data-icon="scan"></span>
+                    <input id="retail-scan-input" type="text" placeholder="امسحي الكود أو اكتبيه ثم اضغطي Enter"
+                           class="input-base pr-9 pl-9" autocomplete="off"
+                           onkeydown="handleScanInput(event, 'retail')">
+                    <button type="button" onclick="openCameraScanModal('retail')"
+                            class="absolute left-1.5 top-1/2 -translate-y-1/2 icon-btn-sm" title="مسح بالكاميرا">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3.5"/></svg>
+                    </button>
+                </div>
             </div>
 
             <!-- اختيار المنتج + المقاس + الكمية -->
@@ -624,6 +943,7 @@
                     <thead class="bg-rose-50/70">
                         <tr>
                             <th class="text-right">المنتج</th>
+                            <th class="no-print">الشركة</th>
                             <th>المقاس</th>
                             <th class="no-print">السعر الأصلي</th>
                             <th>السعر</th>
@@ -644,10 +964,18 @@
 
         <!-- المبالغ النهائية -->
         <div class="card-pad mb-4">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-5">
                 <div>
                     <label class="field-label text-rose-600">المبلغ المدفوع</label>
                     <input id="retail-paid-input" type="number" min="0" value="0"
+                           class="input-base text-xl font-bold text-center focus:border-rose-500 focus:ring-rose-500/10">
+                </div>
+                <div>
+                    <label class="field-label text-rose-600" title="مبلغ بتنزله من إجمالي الفاتورة (مثلاً لتقريب الرقم)، من غير ما يأثر على حساب المكسب">
+                        خصم على الفاتورة
+                    </label>
+                    <input id="retail-discount-input" type="number" min="0" value="0"
+                           oninput="updateRetailTotalAndRemaining()"
                            class="input-base text-xl font-bold text-center focus:border-rose-500 focus:ring-rose-500/10">
                 </div>
                 <div>
@@ -685,6 +1013,152 @@
         </div>
     </div>
 
+    <!-- Debts Section (الديون) -->
+    <div id="debts-section" class="hidden">
+        <div class="mb-4">
+            <h2 class="section-title">💳 الديون</h2>
+            <p class="section-sub">كل العملاء (فواتير التجار وفواتير القطاعي) اللي عليهم فلوس لسه، مجمعين في مكان واحد.</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 sm:gap-4 mb-4">
+            <div class="stat-card">
+                <div class="stat-icon bg-red-50 text-red-600">⚠️</div>
+                <div class="min-w-0">
+                    <div class="text-xs sm:text-sm text-slate-400 font-medium">عدد العملاء المديونين</div>
+                    <div id="debts-customers-count" class="text-xl sm:text-2xl font-extrabold text-slate-900">0</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon bg-red-50 text-red-600">💰</div>
+                <div class="min-w-0">
+                    <div class="text-xs sm:text-sm text-slate-400 font-medium">إجمالي الديون</div>
+                    <div id="debts-total-value" class="text-lg sm:text-xl font-extrabold text-red-600">0.00 جنيه</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="relative mb-4">
+            <span class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">🔍</span>
+            <input id="search-debts-customer" type="text"
+                   placeholder="ابحث باسم العميل..."
+                   class="input-base pr-11"
+                   oninput="renderDebtsList()">
+        </div>
+
+        <div id="debts-list" class="space-y-3"></div>
+    </div>
+
+    <!-- Trash Section (سلة المحذوفات) -->
+    <div id="trash-section" class="hidden">
+        <div class="mb-4">
+            <h2 class="section-title">🗑️ سلة المحذوفات</h2>
+            <p class="section-sub">أي منتج أو فاتورة بتتحذف بتفضل هنا 30 يوم، تقدر ترجعها أو تحذفها نهائي، ولو متعملتش حاجة هتتحذف نهائي تلقائيًا بعد الـ30 يوم.</p>
+        </div>
+
+        <div class="card-pad mb-4">
+            <h3 class="font-bold text-lg mb-4 text-slate-700">🛍️ منتجات محذوفة</h3>
+            <div id="trash-products-list" class="space-y-3"></div>
+        </div>
+
+        <div class="card-pad mb-4">
+            <h3 class="font-bold text-lg mb-4 text-slate-700">📝 فواتير تجار محذوفة</h3>
+            <div id="trash-invoices-list" class="space-y-3"></div>
+        </div>
+
+        <div class="card-pad mb-4">
+            <h3 class="font-bold text-lg mb-4 text-slate-700">🧾 فواتير قطاعي محذوفة</h3>
+            <div id="trash-retail-invoices-list" class="space-y-3"></div>
+        </div>
+    </div>
+
+        </main>
+    </div>
+</div>
+
+<!-- ==================== درج تفاصيل المنتج ==================== -->
+<div id="product-drawer" class="hidden drawer">
+    <div class="drawer-backdrop" onclick="closeProductDrawer()"></div>
+    <div class="drawer-panel">
+        <div class="drawer-head">
+            <div class="min-w-0">
+                <h3 id="drawer-title" class="text-[15px] font-bold text-ink-900 truncate"></h3>
+                <p id="drawer-subtitle" class="text-[12px] text-ink-400 mt-0.5 truncate"></p>
+            </div>
+            <button type="button" class="icon-btn" onclick="closeProductDrawer()" id="btn-close-drawer"></button>
+        </div>
+        <div id="drawer-body" class="drawer-body"></div>
+    </div>
+</div>
+
+<!-- ==================== نافذة كود QR ==================== -->
+<div id="qr-modal" class="hidden fixed inset-0 bg-[rgb(30_34_51/.45)] items-center justify-center z-[80] p-4">
+    <div class="modal modal-panel bg-white w-full max-w-sm mx-auto border border-line">
+        <div class="p-4 border-b border-line flex justify-between items-start gap-3">
+            <div class="min-w-0">
+                <h3 id="qr-product-name" class="text-[15px] font-bold text-ink-900 truncate"></h3>
+                <p id="qr-product-company" class="text-[12px] text-ink-400 mt-0.5 truncate"></p>
+            </div>
+            <button type="button" class="icon-btn" onclick="closeQrPanel()" id="btn-close-qr"></button>
+        </div>
+
+        <div class="p-5 modal-body-scroll">
+            <label class="field-label">المقاس</label>
+            <select id="qr-variant-select" class="input-base mb-4" onchange="updateQrPanel()"></select>
+
+            <div class="flex flex-col items-center gap-3 py-4 rounded-[var(--radius-sm)] border border-line bg-[#F8F9FD]">
+                <div id="qr-canvas-box" class="w-[168px] h-[168px] flex items-center justify-center bg-white rounded-[var(--radius-sm)]"></div>
+                <button type="button" id="qr-code-text" onclick="copyQrCode()"
+                        class="text-[11.5px] tracking-wider text-ink-600 tabular flex items-center gap-1.5 hover:text-primary transition-colors"
+                        title="دوسي هنا تنسخي الكود"></button>
+                <div id="qr-variant-meta" class="text-[12px] text-ink-400"></div>
+            </div>
+
+            <p class="text-[11.5px] text-ink-400 mt-3 leading-relaxed">
+                الكود ده بيعرّف المقاس ده بالتحديد. تقدري تمسحيه بقارئ باركود في نقطة البيع، أو تدوسي عليه فوق لنسخه، أو تحفظي صورته وتطبعيها وتلزقيها على المنتج.
+            </p>
+        </div>
+
+        <div class="p-4 border-t border-line flex flex-col gap-2">
+            <div class="flex gap-2">
+                <button onclick="closeQrPanel()" class="btn-secondary flex-1">إغلاق</button>
+                <button onclick="printQrLabel()" class="btn-primary flex-1" id="btn-print-qr">طباعة الملصق</button>
+            </div>
+            <button onclick="downloadQrImage()" class="btn-tertiary w-full" id="btn-download-qr">⬇ حفظ صورة الكود</button>
+        </div>
+    </div>
+</div>
+
+<!-- ==================== نافذة مسح المنتج بالكاميرا ==================== -->
+<div id="camera-scan-modal" class="hidden fixed inset-0 bg-[rgb(30_34_51/.45)] items-center justify-center z-[80] p-4">
+    <div class="modal modal-panel bg-white w-full max-w-sm mx-auto border border-line">
+        <div class="p-4 border-b border-line flex justify-between items-center gap-3">
+            <h3 class="text-[15px] font-bold text-ink-900">مسح كود المنتج بالكاميرا</h3>
+            <button type="button" class="icon-btn" onclick="closeCameraScanModal()" id="btn-close-camera-scan"></button>
+        </div>
+
+        <div class="p-4 modal-body-scroll">
+            <div id="camera-scan-video-box" class="relative w-full aspect-square bg-black rounded-[var(--radius-sm)] overflow-hidden flex items-center justify-center">
+                <video id="camera-scan-video" class="w-full h-full object-cover" playsinline muted autoplay></video>
+                <div class="absolute inset-6 border-2 border-white/70 rounded-[var(--radius-sm)] pointer-events-none"></div>
+            </div>
+            <p id="camera-scan-status" class="text-[12.5px] text-ink-400 text-center mt-3">وجّهي الكاميرا ناحية كود المنتج…</p>
+
+            <div id="camera-scan-result" class="hidden mt-3 p-4 rounded-[var(--radius-sm)] border border-line bg-[#F8F9FD] text-center">
+                <div id="camera-scan-result-name" class="text-[15px] font-bold text-ink-900"></div>
+                <div id="camera-scan-result-meta" class="text-[13px] text-ink-600 mt-1"></div>
+                <div id="camera-scan-result-price" class="text-[20px] font-extrabold text-primary mt-2"></div>
+                <button type="button" onclick="startCameraScanLoop()" class="btn-tertiary mt-3 w-full text-[12.5px]">مسح كود تاني</button>
+            </div>
+        </div>
+
+        <div class="p-4 border-t border-line">
+            <button onclick="closeCameraScanModal()" class="btn-secondary w-full">إغلاق</button>
+        </div>
+    </div>
+</div>
+
+<div id="toast-host" class="toast-host"></div>
+
     <!-- مودال إضافة/تعديل منتج -->
     <div id="product-modal" class="hidden fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-3 sm:p-4">
         <div class="modal modal-panel bg-white rounded-2xl w-full max-w-lg mx-auto shadow-lifted">
@@ -699,6 +1173,28 @@
                            type="text"
                            class="input-base">
                 </div>
+                <!-- صورة المنتج (اختيارية) -->
+                <div class="mb-6">
+                    <label class="field-label">
+                        صورة المنتج <span class="text-slate-400 font-normal">(اختياري)</span>
+                    </label>
+                    <div class="flex items-center gap-4">
+                        <div id="product-image-preview"
+                             class="w-20 h-20 rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center overflow-hidden shrink-0 text-slate-300"></div>
+                        <div class="flex-1 min-w-0 space-y-2">
+                            <label class="btn-secondary w-full cursor-pointer">
+                                📷 اختيار صورة
+                                <input type="file" accept="image/*" class="hidden" onchange="handleProductImageChange(this)">
+                            </label>
+                            <button type="button" id="product-image-remove-btn" onclick="removeProductImageFromModal()"
+                                    class="hidden w-full text-sm font-semibold text-red-500 hover:text-red-600">
+                                🗑️ مسح الصورة
+                            </button>
+                            <p class="text-xs text-slate-400 leading-relaxed">لو مرفعتيش صورة، هيظهر شكل افتراضي أنيق في الكارت.</p>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- تصنيف الشركة -->
                 <div class="mb-6">
                     <label class="field-label">تصنيف المنتج (الشركة)</label>
@@ -726,6 +1222,42 @@
                 </button>
             </div>
         </div>
+    </div>
+
+    <!-- مودال تسجيل المرتجعات -->
+    <div id="returns-modal" class="hidden fixed inset-0 bg-slate-900/60 items-center justify-center z-[60] p-3 sm:p-4">
+        <div class="modal modal-panel bg-white rounded-2xl w-full max-w-lg mx-auto shadow-lifted">
+            <div class="p-4 sm:p-6 border-b border-slate-100 flex justify-between items-center rounded-t-2xl shrink-0">
+                <div class="min-w-0">
+                    <h3 class="text-lg sm:text-xl font-bold text-slate-900">↩️ تسجيل مرتجع</h3>
+                    <p class="text-xs text-slate-400 mt-1 truncate">
+                        <span id="returns-modal-kind"></span> — <span id="returns-modal-customer"></span>
+                    </p>
+                </div>
+                <button onclick="closeReturnsModal()" class="w-9 h-9 flex items-center justify-center rounded-lg text-2xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition">×</button>
+            </div>
+
+            <div class="p-4 sm:p-6 modal-body-scroll">
+                <p class="text-sm text-slate-500 mb-4">اكتبي الكمية المرجعة من كل منتج. الكمية هترجع للمخزون وقيمتها هتتخصم من إجمالي الفاتورة.</p>
+                <div id="returns-rows-container" class="space-y-3"></div>
+            </div>
+
+            <div class="p-4 sm:p-6 bg-slate-50 border-t border-slate-100 rounded-b-2xl shrink-0">
+                <div class="flex justify-between items-center mb-4 text-sm">
+                    <span class="font-semibold text-slate-600">إجمالي المرتجع</span>
+                    <span id="returns-preview-total" class="text-lg font-extrabold text-purple-700">0.00 جنيه</span>
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="closeReturnsModal()" class="btn-secondary flex-1">إلغاء</button>
+                    <button onclick="submitReturns()" class="btn-primary flex-1">تأكيد الإرجاع</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- عارض صورة المنتج -->
+    <div id="image-lightbox" class="hidden fixed inset-0 bg-slate-900/80 items-center justify-center z-[70] p-6" onclick="closeProductImageLightbox()">
+        <img id="image-lightbox-img" src="" alt="صورة المنتج" class="max-w-full max-h-[80vh] rounded-2xl shadow-lifted bg-white">
     </div>
 
     <!-- مودال إدارة الشركات -->
@@ -850,7 +1382,13 @@
                     </div>
                 </div>
 
-                
+                <div class="pt-2 border-t border-slate-100">
+                    <button onclick="recalculateOldInvoicesProfit()" class="btn-secondary w-full !py-3 text-sm">
+                        🔄 إعادة حساب مكسب الفواتير القديمة بالسعر الأصلي الحالي
+                    </button>
+                    <p class="text-xs text-slate-400 mt-2 text-center">هيحدّث مكسب كل الفواتير القطاعي المحفوظة بناءً على السعر الأصلي المسجل دلوقتي على كل منتج.</p>
+                </div>
+
             </div>
 
             <div class="p-5 sm:p-6 bg-slate-50 border-t border-slate-100 rounded-b-2xl shrink-0">
@@ -888,7 +1426,17 @@
     console.log("✅ Firebase Firestore + Authentication تم تهيئتهما بنجاح");
     </script>
 
+    <!--
+        ملاحظة مهمة: إصدار qrcode@1.5.3 فيه خطأ معروف في مكتبة الـ npm نفسها
+        (مش بيتنشر معاه ملف build/qrcode.min.js أصلًا)، فكان بيرجع 404 في كل مرة
+        حتى لو الإنترنت شغال تمام، وده اللي كان بيظهر رسالة "تأكدي من الاتصال
+        بالإنترنت" رغم إن النت موجود. اتثبّت هنا على إصدار شغال (1.5.1)، ومعاه
+        نسخة احتياطية تانية (unpkg) بتتحمّل تلقائي لو أي مصدر فشل.
+    -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"
+            onerror="this.onerror=null; var s=document.createElement('script'); s.src='https://unpkg.com/qrcode@1.5.1/build/qrcode.min.js'; document.head.appendChild(s);"></script>
     <script src="script.js"></script>
+    <script src="ui.js"></script>
 
 </div>
 </body>
