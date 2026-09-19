@@ -297,6 +297,21 @@ function kpi(label, value, sub, iconName, tone) {
 function renderDashboard() {
     const root = document.getElementById('dashboard-body');
     if (!root) return;
+
+    // الصفحة دي فيها أرقام المبيعات والأرباح، فمقفولة بكلمة السر
+    if (typeof isSecretUnlocked === 'function' && !isSecretUnlocked()) {
+        root.innerHTML = `
+            <div class="panel">
+                <div class="panel-body text-center py-14">
+                    <div class="text-5xl mb-4">🔒</div>
+                    <h3 class="panel-title mb-1">الصفحة دي محميّة</h3>
+                    <p class="panel-sub mb-6">فيها إجمالي المبيعات والأرباح والمستحقات</p>
+                    <button onclick="unlockAndRender('dashboard')" class="btn-primary">اكتبي كلمة السر للعرض</button>
+                </div>
+            </div>`;
+        return;
+    }
+
     const d = computeDashboard();
 
     root.innerHTML = `
@@ -478,13 +493,16 @@ window.updateLowStockAlert = function () {
 window.toggleLowStockPanel = function () { setProductStockFilter('low'); };
 
 // إعادة تعريف: إظهار/إخفاء السعر الأصلي
-window.toggleOriginalPriceCell = function (btn) {
+window.toggleOriginalPriceCell = async function (btn) {
     const wrapper = btn.parentElement;
     if (!wrapper) return;
     const maskEl = wrapper.querySelector('.hidden-price-mask');
     const valueEl = wrapper.querySelector('.hidden-price-value');
     if (!maskEl || !valueEl) return;
     const isHidden = valueEl.classList.contains('hidden');
+    // الإظهار محتاج كلمة السر (الأسعار الأصلية والمكسب محميين)
+    if (isHidden && typeof requireSecret === 'function'
+        && !(await requireSecret('البيانات دي محميّة — اكتبي كلمة السر:'))) return;
     maskEl.classList.toggle('hidden', isHidden);
     valueEl.classList.toggle('hidden', !isHidden);
     btn.innerHTML = icon(isHidden ? 'eyeOff' : 'eye', 'w-4 h-4');
@@ -820,7 +838,6 @@ function printQrLabel() {
             .name { font-size:15px; font-weight:700; margin-bottom:2px; }
             .meta { font-size:12px; color:#6D5CE7; margin-bottom:10px; }
             .code { font-size:11px; letter-spacing:.06em; color:#6D5CE7; margin-top:8px; }
-            .price { font-size:16px; font-weight:700; margin-top:6px; }
             img { width: 150px; height: 150px; }
         </style></head><body>
         <div class="label">
@@ -828,7 +845,6 @@ function printQrLabel() {
             <div class="meta">مقاس ${esc(size)}</div>
             ${dataUrl ? `<img src="${dataUrl}" alt="">` : ''}
             <div class="code">${esc(code)}</div>
-            <div class="price">${variant ? fmtMoney(variant.price) : ''} ج.م</div>
         </div>
         </body></html>`);
     win.document.close();
@@ -983,6 +999,17 @@ function handleCameraScanResult(code) {
     const nameEl = document.getElementById('camera-scan-result-name');
     const metaEl = document.getElementById('camera-scan-result-meta');
     const priceEl = document.getElementById('camera-scan-result-price');
+    const imgBox = document.getElementById('camera-scan-result-img');
+    if (imgBox) {
+        const src = (typeof getProductImage === 'function') ? getProductImage(found.product.id) : '';
+        if (src) {
+            imgBox.innerHTML = `<img src="${src}" alt="صورة المنتج" class="w-full h-full object-cover">`;
+            imgBox.classList.remove('hidden');
+        } else {
+            imgBox.innerHTML = '';
+            imgBox.classList.add('hidden');
+        }
+    }
     if (nameEl) nameEl.textContent = found.product.name;
     if (metaEl) metaEl.textContent = `المقاس ${found.variant.size} · المخزون ${fmtNum(found.variant.stock)}`;
     if (priceEl) priceEl.textContent = `${fmtMoney(found.variant.price)} ج.م`;

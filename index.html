@@ -198,6 +198,31 @@
         }
         .icon-btn-sm:hover { background: #EEF0F8; color: var(--ink-700); }
 
+        /* ================= أزرار الفواتير (شكل جديد مرتب) ================= */
+        .inv-actions {
+            display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end;
+            margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line);
+        }
+        .inv-actions.center { justify-content: center; }
+        .inv-act {
+            display: inline-flex; align-items: center; gap: 6px; line-height: 1;
+            font-size: 13px; font-weight: 600; padding: 9px 14px; border-radius: 999px;
+            border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-700);
+            transition: transform .15s, box-shadow .15s, background .15s;
+        }
+        .inv-act:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgb(30 34 51 / .10); }
+        .inv-act-blue    { color:#1D4ED8; border-color:#BFDBFE; background:#EFF6FF; }
+        .inv-act-green   { color:#047857; border-color:#A7F3D0; background:#ECFDF5; }
+        .inv-act-amber   { color:#B45309; border-color:#FDE68A; background:#FFFBEB; }
+        .inv-act-red     { color:#B91C1C; border-color:#FECACA; background:#FEF2F2; }
+        .inv-act-purple  { color:#6D28D9; border-color:#DDD6FE; background:#F5F3FF; }
+        .inv-act-sm      { font-size: 11.5px; padding: 6px 10px; }
+        .inv-badge-done {
+            display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700;
+            color: #047857; background: #ECFDF5; border: 1px solid #A7F3D0;
+            border-radius: 999px; padding: 9px 14px;
+        }
+
         /* ================= الأسطح ================= */
         .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
         .panel-head {
@@ -285,6 +310,22 @@
             background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239096B0' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
             background-repeat: no-repeat; background-position: left 10px center; background-size: 14px;
         }
+
+        /* ===== خصم على الفاتورة: القائمة صغيرة وخانة الكتابة كبيرة ===== */
+        .discount-row { display: flex; gap: 8px; align-items: stretch; width: 100%; }
+        .discount-row select.discount-type {
+            flex: 0 0 76px; width: 76px; min-width: 0;
+            padding: 8px 6px 8px 22px; font-size: 13px; font-weight: 600; text-align: center;
+            background-position: left 6px center; background-size: 12px;
+        }
+        .discount-row input.discount-value {
+            flex: 1 1 0%; width: auto; min-width: 0; text-align: center;
+            font-size: 20px; font-weight: 700; padding: 8px 10px;
+            -moz-appearance: textfield; appearance: textfield;
+        }
+        .discount-row input.discount-value::-webkit-outer-spin-button,
+        .discount-row input.discount-value::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        @media (max-width: 767px) { .discount-cell { grid-column: span 2 / span 2; } }
         .chip {
             display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 99px;
             font-size: 12.5px; font-weight: 600; border: 1px solid var(--line-strong);
@@ -730,16 +771,25 @@
                 </div>
 
                 <!-- خصم على الفاتورة -->
-                <div>
+                <div class="discount-cell">
                     <label class="field-label" title="مبلغ بتنزله من إجمالي الفاتورة (مثلاً لتقريب الرقم)، من غير ما يأثر على حساب المكسب">
                         خصم على الفاتورة
                     </label>
-                    <input id="discount-input"
-                           type="number"
-                           min="0"
-                           value="0"
-                           oninput="updateTotalAndRemaining()"
-                           class="input-base text-xl font-bold text-center">
+                    <div class="discount-row">
+                        <select id="discount-type" onchange="updateTotalAndRemaining()"
+                                class="input-base discount-type">
+                            <option value="amount">جنيه</option>
+                            <option value="percent">%</option>
+                        </select>
+                        <input id="discount-input"
+                               type="number"
+                               min="0"
+                               value="0"
+                               oninput="updateTotalAndRemaining()"
+                               inputmode="decimal"
+                               class="input-base discount-value">
+                    </div>
+                    <div id="discount-hint" class="text-[11px] font-semibold text-amber-600 mt-1 min-h-[14px]"></div>
                 </div>
 
                 <!-- الإجمالي -->
@@ -970,13 +1020,21 @@
                     <input id="retail-paid-input" type="number" min="0" value="0"
                            class="input-base text-xl font-bold text-center focus:border-rose-500 focus:ring-rose-500/10">
                 </div>
-                <div>
+                <div class="discount-cell">
                     <label class="field-label text-rose-600" title="مبلغ بتنزله من إجمالي الفاتورة (مثلاً لتقريب الرقم)، من غير ما يأثر على حساب المكسب">
                         خصم على الفاتورة
                     </label>
-                    <input id="retail-discount-input" type="number" min="0" value="0"
-                           oninput="updateRetailTotalAndRemaining()"
-                           class="input-base text-xl font-bold text-center focus:border-rose-500 focus:ring-rose-500/10">
+                    <div class="discount-row">
+                        <select id="retail-discount-type" onchange="updateRetailTotalAndRemaining()"
+                                class="input-base discount-type">
+                            <option value="amount">جنيه</option>
+                            <option value="percent">%</option>
+                        </select>
+                        <input id="retail-discount-input" type="number" min="0" value="0"
+                               oninput="updateRetailTotalAndRemaining()" inputmode="decimal"
+                               class="input-base discount-value focus:border-rose-500 focus:ring-rose-500/10">
+                    </div>
+                    <div id="retail-discount-hint" class="text-[11px] font-semibold text-amber-600 mt-1 min-h-[14px]"></div>
                 </div>
                 <div>
                     <label class="field-label text-rose-600">الإجمالي</label>
@@ -1144,6 +1202,7 @@
             <p id="camera-scan-status" class="text-[12.5px] text-ink-400 text-center mt-3">وجّهي الكاميرا ناحية كود المنتج…</p>
 
             <div id="camera-scan-result" class="hidden mt-3 p-4 rounded-[var(--radius-sm)] border border-line bg-[#F8F9FD] text-center">
+                <div id="camera-scan-result-img" class="hidden mx-auto mb-3 w-[120px] h-[120px] rounded-[10px] overflow-hidden border border-line bg-white"></div>
                 <div id="camera-scan-result-name" class="text-[15px] font-bold text-ink-900"></div>
                 <div id="camera-scan-result-meta" class="text-[13px] text-ink-600 mt-1"></div>
                 <div id="camera-scan-result-price" class="text-[20px] font-extrabold text-primary mt-2"></div>

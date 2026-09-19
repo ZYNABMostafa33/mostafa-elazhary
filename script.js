@@ -24,6 +24,198 @@ function makeTrashId() {
     return Date.now() + '-' + Math.floor(Math.random() * 1000000);
 }
 
+/* ==================== قفل بكلمة السر ====================
+   بيحمي: الأسعار الأصلية (شكل + تعديل) / المكسب وتقرير الأرباح / صفحة الرسوم البيانية.
+   بعد ما تكتبي كلمة السر مرة، بتفضل مفتوحة 10 دقايق بس، وبعدها بتقفل لوحدها. */
+const APP_SECRET_PASSWORD = '1323@';
+const SECRET_VISIBLE_SECONDS = 100;   // بعدها بيتخفي كل حاجة وبيتطلب الباسورد تاني
+let __secretUnlockedUntil = 0;
+let __secretAutoLockTimer = null;
+
+function isSecretUnlocked() { return Date.now() < __secretUnlockedUntil; }
+window.isSecretUnlocked = isSecretUnlocked;
+
+// بيرجّع كل الأسعار/المكاسب المكشوفة لحالة الإخفاء تاني
+function hideAllRevealedSecrets() {
+    document.querySelectorAll('.hidden-price-value:not(.hidden)').forEach(valueEl => {
+        const wrapper = valueEl.parentElement;
+        if (!wrapper) return;
+        valueEl.classList.add('hidden');
+        const maskEl = wrapper.querySelector('.hidden-price-mask');
+        if (maskEl) maskEl.classList.remove('hidden');
+        const btn = wrapper.querySelector('button');
+        if (btn && typeof icon === 'function') btn.innerHTML = icon('eye', 'w-4 h-4');
+    });
+}
+
+function scheduleSecretAutoLock() {
+    if (__secretAutoLockTimer) clearTimeout(__secretAutoLockTimer);
+    __secretAutoLockTimer = setTimeout(() => {
+        __secretUnlockedUntil = 0;
+        hideAllRevealedSecrets();
+        // لو مودال المنتج مفتوح أو لوحة المعلومات ظاهرة، نعيد رسمهم في حالة القفل
+        const productModal = document.getElementById('product-modal');
+        if (productModal && !productModal.classList.contains('hidden') && typeof renderVariantsInModal === 'function') {
+            renderVariantsInModal();
+        }
+        const dash = document.getElementById('dashboard-section');
+        if (dash && !dash.classList.contains('hidden') && typeof renderDashboard === 'function') {
+            renderDashboard();
+        }
+        if (typeof closeProfitModal === 'function') {
+            const pm = document.getElementById('profit-modal');
+            if (pm && !pm.classList.contains('hidden')) closeProfitModal();
+        }
+        if (typeof showToast === 'function') showToast('خلصت الـ 100 ثانية — اتقفلت تاني', 'warning');
+    }, SECRET_VISIBLE_SECONDS * 1000);
+}
+
+// صندوق كلمة السر (بيكتب نقط مش ظاهرة)، بيرجّع Promise<boolean>
+function askSecretPassword(reason) {
+    return new Promise(resolve => {
+        const old = document.getElementById('secret-ask-modal');
+        if (old) old.remove();
+
+        const box = document.createElement('div');
+        box.id = 'secret-ask-modal';
+        box.style.cssText = 'position:fixed;inset:0;background:rgba(30,34,51,.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;';
+        box.innerHTML = `
+            <div style="background:#fff;border-radius:16px;padding:22px;width:100%;max-width:320px;text-align:center;font-family:'Cairo',Arial,sans-serif;" dir="rtl">
+                <div style="font-size:30px;margin-bottom:8px;">🔒</div>
+                <div style="font-size:14px;font-weight:700;color:#1E2233;margin-bottom:14px;">${reason || 'البيانات دي محميّة — اكتبي كلمة السر:'}</div>
+                <input id="secret-ask-input" type="password" autocomplete="off"
+                       style="width:100%;padding:12px;border:1px solid #DDD6C9;border-radius:12px;text-align:center;font-size:18px;letter-spacing:.3em;box-sizing:border-box;">
+                <div id="secret-ask-err" style="color:#dc2626;font-size:12px;height:16px;margin-top:6px;"></div>
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                    <button type="button" id="secret-ask-ok" style="flex:1;padding:11px;border-radius:12px;border:none;background:#6D5CE7;color:#fff;font-weight:700;">تأكيد</button>
+                    <button type="button" id="secret-ask-cancel" style="flex:1;padding:11px;border-radius:12px;border:1px solid #DDD6C9;background:#fff;color:#555;font-weight:700;">إلغاء</button>
+                </div>
+            </div>`;
+        document.body.appendChild(box);
+
+        const input = box.querySelector('#secret-ask-input');
+        const err = box.querySelector('#secret-ask-err');
+        setTimeout(() => input.focus(), 50);
+
+        const finish = ok => { box.remove(); resolve(ok); };
+        const submit = () => {
+            if (String(input.value).trim() === APP_SECRET_PASSWORD) {
+                __secretUnlockedUntil = Date.now() + SECRET_VISIBLE_SECONDS * 1000;
+                scheduleSecretAutoLock();
+                finish(true);
+            } else {
+                err.textContent = 'كلمة السر غلط';
+                input.value = '';
+                input.focus();
+            }
+        };
+        box.querySelector('#secret-ask-ok').onclick = submit;
+        box.querySelector('#secret-ask-cancel').onclick = () => finish(false);
+        input.onkeydown = e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') finish(false); };
+        box.onclick = e => { if (e.target === box) finish(false); };
+    });
+}
+window.requireSecret = askSecretPassword;   // اسم قديم متوافق، لكن دلوقتي بيرجّع Promise
+
+// قفل فوري من غير ما تستني الـ 100 ثانية
+window.lockSecretNow = function () {
+    __secretUnlockedUntil = 0;
+    if (__secretAutoLockTimer) { clearTimeout(__secretAutoLockTimer); __secretAutoLockTimer = null; }
+    hideAllRevealedSecrets();
+    if (typeof renderProducts === 'function') renderProducts();
+    if (typeof renderDashboard === 'function') renderDashboard();
+    if (typeof showToast === 'function') showToast('اتقفلت تاني', 'warning');
+};
+
+// فتح القفل ثم إعادة رسم الشاشة اللي محتاجة إذن
+window.unlockAndRender = async function (what) {
+    const ok = await askSecretPassword();
+    if (!ok) return;
+    if (what === 'variants' && typeof renderVariantsInModal === 'function') renderVariantsInModal();
+    if (what === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
+    if (what === 'products' && typeof renderProducts === 'function') renderProducts();
+};
+
+/* ==================== بيانات المحل (بتظهر في آخر الفاتورة المطبوعة) ==================== */
+const SHOP_FACEBOOK_URL  = 'https://www.facebook.com/share/1CYhb53Kx8/';
+const SHOP_FACEBOOK_NAME = 'معرض الأزهرى للأدوات الصحيه';
+const SHOP_PHONE         = '01141257655';
+
+let __fbQrDataUrl = '';
+function ensureFacebookQr() {
+    return new Promise(resolve => {
+        if (__fbQrDataUrl) return resolve(__fbQrDataUrl);
+        if (typeof QRCode === 'undefined' || !QRCode.toDataURL) return resolve('');
+        try {
+            QRCode.toDataURL(SHOP_FACEBOOK_URL, {
+                width: 220, margin: 1, color: { dark: '#1E2233', light: '#FFFFFF' }
+            }, (err, url) => {
+                if (!err && url) __fbQrDataUrl = url;
+                resolve(__fbQrDataUrl);
+            });
+        } catch (e) { resolve(''); }
+    });
+}
+window.ensureFacebookQr = ensureFacebookQr;
+
+// نجهّز الكود بدري عشان الطباعة تطلع فورًا
+document.addEventListener('DOMContentLoaded', () => {
+    ensureFacebookQr();
+    setTimeout(ensureFacebookQr, 2500);
+});
+
+// آخر الفاتورة: كود الصفحة + الاسم + رقم التليفون
+function shopPrintFooterHtml(qrDataUrl, accent) {
+    accent = accent || '#14B8A6';
+    return `
+        <div style="margin-top:34px;padding-top:14px;border-top:2px dashed #CBD5E1;
+                    display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap;">
+            ${qrDataUrl ? `<img src="${qrDataUrl}" alt="QR"
+                 style="width:78px;height:78px;border:1px solid #E2E8F0;border-radius:6px;padding:3px;background:#fff;">` : ''}
+            <div style="text-align:right;font-size:13px;line-height:1.9;color:#334155;">
+                <div style="font-weight:700;color:${accent};font-size:15px;">${SHOP_FACEBOOK_NAME}</div>
+                <div>امسح الكود بالكاميرا يوديك على صفحتنا على فيسبوك</div>
+                <div style="font-weight:700;">للاستفسار: ${SHOP_PHONE}</div>
+            </div>
+        </div>`;
+}
+
+/* ==================== الخصم: مبلغ أو نسبة ==================== */
+function computeDiscountAmount(scope, rawTotal) {
+    const isRetail = scope === 'retail';
+    const input  = document.getElementById(isRetail ? 'retail-discount-input' : 'discount-input');
+    const typeEl = document.getElementById(isRetail ? 'retail-discount-type'  : 'discount-type');
+    const hintEl = document.getElementById(isRetail ? 'retail-discount-hint'  : 'discount-hint');
+
+    const raw  = parseFloat(input ? input.value : 0) || 0;
+    const type = typeEl ? typeEl.value : 'amount';
+
+    let amount = raw;
+    if (type === 'percent') {
+        const pct = Math.min(100, Math.max(0, raw));
+        amount = (Number(rawTotal) || 0) * pct / 100;
+    }
+    amount = Math.max(0, Math.min(Number(rawTotal) || 0, amount));
+
+    if (hintEl) {
+        hintEl.textContent = (type === 'percent' && raw > 0)
+            ? `خصم ${raw}% = ${amount.toFixed(2)} جنيه`
+            : '';
+    }
+    return amount;
+}
+window.computeDiscountAmount = computeDiscountAmount;
+
+// لما نفتح فاتورة قديمة للتعديل، الخصم المحفوظ مبلغ جاهز مش نسبة
+function setDiscountFieldsFromSaved(scope, savedAmount) {
+    const isRetail = scope === 'retail';
+    const input  = document.getElementById(isRetail ? 'retail-discount-input' : 'discount-input');
+    const typeEl = document.getElementById(isRetail ? 'retail-discount-type'  : 'discount-type');
+    if (typeEl) typeEl.value = 'amount';
+    if (input) input.value = Number(savedAmount || 0).toFixed(2);
+}
+window.setDiscountFieldsFromSaved = setDiscountFieldsFromSaved;
+
 // ==================== قائمة الشركات (تصنيف المنتجات) - قابلة للتعديل ====================
 const DEFAULT_COMPANIES = [
     { id: 'redsea',    label: 'البحر الأحمر' },
@@ -514,13 +706,15 @@ function toggleProductDetails(id) {
 
 // ==================== عرض المنتجات (بعد التحديث) ====================
 // ==================== إظهار/إخفاء السعر الأصلي لصف مقاس معين (مخفي افتراضيًا) ====================
-function toggleOriginalPriceCell(btn) {
+async function toggleOriginalPriceCell(btn) {
     const wrapper = btn.parentElement;
     if (!wrapper) return;
     const maskEl = wrapper.querySelector('.hidden-price-mask');
     const valueEl = wrapper.querySelector('.hidden-price-value');
     if (!maskEl || !valueEl) return;
     const isHidden = valueEl.classList.contains('hidden');
+    // الإظهار محتاج كلمة السر، أما الإخفاء فمسموح لأي حد
+    if (isHidden && !(await requireSecret('عشان تشوفي السعر الأصلي اكتبي كلمة السر:'))) return;
     maskEl.classList.toggle('hidden', isHidden);
     valueEl.classList.toggle('hidden', !isHidden);
     btn.textContent = isHidden ? '' : '';
@@ -805,7 +999,9 @@ function renderVariantsInModal() {
             <div class="flex gap-3 items-center">
                 <div class="flex-1">
                     <label class="text-xs text-slate-400 mb-1 block">السعر الأصلي</label>
-                    <input type="number" step="0.01" min="0" placeholder="السعر الأصلي" value="${variant.originalPrice || ''}" oninput="updateVariantOriginalPrice(${index}, this.value)" class="w-full px-4 py-3 rounded-xl border focus:border-blue-400 text-lg text-center">
+                    ${isSecretUnlocked()
+                        ? `<input type="number" step="0.01" min="0" placeholder="السعر الأصلي" value="${variant.originalPrice || ''}" oninput="updateVariantOriginalPrice(${index}, this.value)" class="w-full px-4 py-3 rounded-xl border focus:border-blue-400 text-lg text-center">`
+                        : `<button type="button" onclick="unlockAndRender('variants')" class="w-full px-4 py-3 rounded-xl border border-dashed bg-slate-50 text-slate-400 text-sm font-semibold">🔒 محمي — اضغطي لإدخال كلمة السر</button>`}
                 </div>
                 <div class="flex-1">
                     <label class="text-xs text-slate-400 mb-1 block">السعر بعد المكسب</label>
@@ -890,7 +1086,7 @@ function closeModal() {
     modal.classList.remove('flex');
 }
 
-function saveProduct() {
+async function saveProduct() {
     const name = document.getElementById('product-name').value.trim();
     if (!name) return alert(' ضع اسم المنتج');
 
@@ -913,6 +1109,21 @@ function saveProduct() {
         }));
 
     if (cleanVariants.length === 0) return alert(' تأكد إن كل مقاس له اسم وسعر صحيح');
+
+    // ==== حماية السعر الأصلي وقت الحفظ نفسه ====
+    // حتى لو الشاشة كانت متفتحة (خلال الـ 100 ثانية) وحد غيّر في السعر الأصلي،
+    // الحفظ نفسه مش هيتم إلا لو كتب كلمة السر دلوقتي بالظبط.
+    if (editingProductId !== null) {
+        const existingProduct = products.find(p => p.id === editingProductId);
+        const originalPriceChanged = !!existingProduct && cleanVariants.some(v => {
+            const oldVariant = (existingProduct.variants || []).find(ov => ov.size === v.size);
+            const oldPrice = oldVariant ? (Number(oldVariant.originalPrice) || 0) : 0;
+            return Math.abs(oldPrice - (Number(v.originalPrice) || 0)) > 0.001;
+        });
+        if (originalPriceChanged && !(await requireSecret('السعر الأصلي اتغيّر — لازم كلمة السر عشان يتحفظ التعديل:'))) {
+            return; // الباسورد غلط أو اتلغى — الحفظ مبيحصلش خالص والمنتج بيفضل زي ما كان
+        }
+    }
 
     let savedProductId = editingProductId;
 
@@ -1115,7 +1326,7 @@ function getCustomerPreviousDebt(customerName, excludeIndex = -1) {
 // ==================== تحديث الإجمالي والمتبقي (النسخة الصحيحة) ====================
 function updateTotalAndRemaining() {
     const rawTotal = currentInvoice.reduce((sum, item) => sum + (item.subtotal || 0), 0);
-    const discount = parseFloat(document.getElementById("discount-input")?.value || 0) || 0;
+    const discount = computeDiscountAmount('invoice', rawTotal);
     const currentTotal = Math.max(0, rawTotal - discount);
     const paid = parseFloat(document.getElementById("paid-input")?.value || 0) || 0;
     const customerName = document.getElementById('customer-name').value.trim();
@@ -1192,6 +1403,10 @@ function saveCurrentInvoice() {
     document.getElementById('remaining-input').value = '0';
     const discountInputAfterSave = document.getElementById('discount-input');
     if (discountInputAfterSave) discountInputAfterSave.value = '0';
+    const discountTypeAfterSave = document.getElementById('discount-type');
+    if (discountTypeAfterSave) discountTypeAfterSave.value = 'amount';
+    const discountHintAfterSave = document.getElementById('discount-hint');
+    if (discountHintAfterSave) discountHintAfterSave.textContent = '';
 
     updateInvoiceHeader();
     renderSavedInvoices();
@@ -1408,11 +1623,11 @@ function buildInvoiceCardHTML(inv, index) {
                 </div>
 
                 <!-- أزرار -->
-                <div class="flex justify-end gap-4 mt-4 flex-wrap">
-                    <button onclick="openReturnsModal('invoice', ${index})" class="text-purple-600 underline font-semibold"> تسجيل مرتجع</button>
-                    <button onclick="printSavedInvoice(${index})" class="text-blue-600 underline">طباعة</button>
-                    <button onclick="editSavedInvoice(${index})" class="text-amber-600 underline">تعديل</button>
-                    <button onclick="deleteSavedInvoice(${index})" class="text-red-600 underline">حذف</button>
+                <div class="inv-actions no-print">
+                    <button onclick="openReturnsModal('invoice', ${index})" class="inv-act inv-act-purple">↩ مرتجع</button>
+                    <button onclick="printSavedInvoice(${index})" class="inv-act inv-act-blue">🖨 طباعة</button>
+                    <button onclick="editSavedInvoice(${index})" class="inv-act inv-act-amber">✎ تعديل</button>
+                    <button onclick="deleteSavedInvoice(${index})" class="inv-act inv-act-red">🗑 حذف</button>
                 </div>
 
             </div>
@@ -1518,8 +1733,7 @@ function editSavedInvoice(index) {
         paidInput.value = Number(invoice.paid || 0).toFixed(2);
     }
 
-    const discountInputEdit = document.getElementById('discount-input');
-    if (discountInputEdit) discountInputEdit.value = Number(invoice.discount || 0).toFixed(2);
+    setDiscountFieldsFromSaved('invoice', invoice.discount);
 
     renderInvoiceTable();
     updateTotalAndRemaining();
@@ -1530,7 +1744,7 @@ function editSavedInvoice(index) {
     showToast(' جاري تعديل الفاتورة...', 'warning');
 }
 
-function printSavedInvoice(index) {
+async function printSavedInvoice(index) {
     const inv = savedInvoices[index];
     if (!inv) return;
 
@@ -1547,6 +1761,8 @@ function printSavedInvoice(index) {
     const grandTotal = currentTotal + previousDebt;
     const paid = Number(inv.paid) || 0;
     const remaining = grandTotal - paid;
+
+    const fbQr = await ensureFacebookQr();
 
     const html = `
         <html dir="rtl" lang="ar">
@@ -1681,6 +1897,7 @@ function printSavedInvoice(index) {
                 شكرًا لتعاملك مع مصطفى الازهرى للادوات الصحية<br>
                 برجاء الاحتفاظ بالفاتورة
             </div>
+            ${shopPrintFooterHtml(fbQr, '#1E3A5F')}
         </body>
         </html>
     `;
@@ -2039,7 +2256,8 @@ function buildRetailProfitByDay() {
     return map;
 }
 
-window.openProfitModal = function() {
+window.openProfitModal = async function() {
+    if (!(await requireSecret('تقرير الأرباح محميّ — اكتبي كلمة السر:'))) return;
     const dateInput = document.getElementById('profit-date-input');
     if (dateInput && !dateInput.value) {
         dateInput.value = toLocalDateKey(Date.now());
@@ -2830,7 +3048,7 @@ function filterRetailInvoicesByCustomer() {
 // ==================== تحديث الإجمالي + الدين + المتبقي للقطاعي ====================
 function updateRetailTotalAndRemaining() {
     const rawTotal = retailInvoice.reduce((sum, item) => sum + (item.subtotal || 0), 0);
-    const discount = parseFloat(document.getElementById("retail-discount-input")?.value || 0) || 0;
+    const discount = computeDiscountAmount('retail', rawTotal);
     // الخصم بينزل من إجمالي الفاتورة هنا. المكسب نفسه بيتحسب من سعر كل منتج وتكلفته
     // (في computeRetailInvoiceProfitAdjusted)، وبعدين بينزل منه قيمة الخصم لوحده هناك.
     const currentTotal = Math.max(0, rawTotal - discount);
@@ -2966,6 +3184,10 @@ function saveRetailInvoice() {
     if (remEl) remEl.value = '0';
     const discountInputAfterSave = document.getElementById('retail-discount-input');
     if (discountInputAfterSave) discountInputAfterSave.value = '0';
+    const discountTypeAfterSaveR = document.getElementById('retail-discount-type');
+    if (discountTypeAfterSaveR) discountTypeAfterSaveR.value = 'amount';
+    const discountHintAfterSaveR = document.getElementById('retail-discount-hint');
+    if (discountHintAfterSaveR) discountHintAfterSaveR.textContent = '';
 
     const cancelBtnAfterSave = document.getElementById('cancel-edit-retail-btn');
     if (cancelBtnAfterSave) cancelBtnAfterSave.classList.add('hidden');
@@ -3211,8 +3433,8 @@ function buildRetailCardHTML(inv, index) {
                                     <div class="text-green-600 font-semibold">دفع ${p.amount.toFixed(2)} جنيه</div>
                                     <div class="${p.remainingAfter > 0 ? 'text-red-600' : 'text-green-600'} font-bold">متبقي ${p.remainingAfter.toFixed(2)} جنيه</div>
                                     <div class="flex items-center gap-3">
-                                        <button onclick="startEditRetailPayment(${index}, '${p.id}')" class="text-amber-600 text-xs underline"> تعديل</button>
-                                        <button onclick="deleteRetailPayment(${index}, '${p.id}')" class="text-red-600 text-xs underline"> حذف</button>
+                                        <button onclick="startEditRetailPayment(${index}, '${p.id}')" class="inv-act inv-act-sm inv-act-amber">✎ تعديل</button>
+                                        <button onclick="deleteRetailPayment(${index}, '${p.id}')" class="inv-act inv-act-sm inv-act-red">🗑 حذف</button>
                                     </div>
                                 </div>
                             `).join('')}
@@ -3243,19 +3465,19 @@ function buildRetailCardHTML(inv, index) {
                     </div>
                 </div>
 
-                <div class="flex justify-center items-center flex-wrap gap-4 mt-4">
-                    <button onclick="openReturnsModal('retail', ${index})" class="text-purple-600 underline font-semibold"> تسجيل مرتجع</button>
-                    <button onclick="printRetailSavedInvoice(${index})" class="text-green-600 underline">طباعة</button>
+                <div class="inv-actions center no-print">
                     ${inv.settled
-                        ? `<span class="text-emerald-600 font-semibold"> خالصة (يدوي)</span>
-                           <button onclick="toggleRetailInvoiceSettled(${index})" class="text-slate-500 underline text-sm"> إلغاء الخالصة</button>`
+                        ? `<span class="inv-badge-done">✓ خالصة (يدوي)</span>
+                           <button onclick="toggleRetailInvoiceSettled(${index})" class="inv-act inv-act-sm">↺ إلغاء الخالصة</button>`
                         : (remaining > 0
-                            ? `<button onclick="toggleRetailPayForm(${index})" class="text-blue-600 underline font-semibold"> دفع المتبقي</button>
-                               <button onclick="toggleRetailInvoiceSettled(${index})" class="text-emerald-600 underline font-semibold"> اعتبارها خالصة</button>`
-                            : `<span class="text-emerald-600 font-semibold"> تم السداد بالكامل</span>`)
+                            ? `<button onclick="toggleRetailPayForm(${index})" class="inv-act inv-act-green">💵 دفع المتبقي</button>
+                               <button onclick="toggleRetailInvoiceSettled(${index})" class="inv-act inv-act-green">✓ اعتبارها خالصة</button>`
+                            : `<span class="inv-badge-done">✓ تم السداد بالكامل</span>`)
                     }
-                    <button onclick="editRetailSavedInvoice(${index})" class="text-amber-600 underline">تعديل</button>
-                    <button onclick="deleteRetailSavedInvoice(${index})" class="text-red-600 underline">حذف</button>
+                    <button onclick="openReturnsModal('retail', ${index})" class="inv-act inv-act-purple">↩ مرتجع</button>
+                    <button onclick="printRetailSavedInvoice(${index})" class="inv-act inv-act-blue">🖨 طباعة</button>
+                    <button onclick="editRetailSavedInvoice(${index})" class="inv-act inv-act-amber">✎ تعديل</button>
+                    <button onclick="deleteRetailSavedInvoice(${index})" class="inv-act inv-act-red">🗑 حذف</button>
                 </div>
             </div>
     `;
@@ -3462,8 +3684,7 @@ window.editRetailSavedInvoice = function(index) {
         paidInput.title = 'لإضافة دفعة جديدة استخدم زرار "دفع المتبقي" في قائمة الفواتير السابقة';
     }
 
-    const discountInput = document.getElementById('retail-discount-input');
-    if (discountInput) discountInput.value = Number(invoice.discount || 0).toFixed(2);
+    setDiscountFieldsFromSaved('retail', invoice.discount);
 
     renderRetailTable();
     renderRetailStaging();
@@ -3501,6 +3722,10 @@ window.cancelEditRetailInvoice = function() {
 
     const discountInputCancel = document.getElementById('retail-discount-input');
     if (discountInputCancel) discountInputCancel.value = '0';
+    const discountTypeCancel = document.getElementById('retail-discount-type');
+    if (discountTypeCancel) discountTypeCancel.value = 'amount';
+    const discountHintCancel = document.getElementById('retail-discount-hint');
+    if (discountHintCancel) discountHintCancel.textContent = '';
 
     renderRetailTable();
     renderRetailStaging();
@@ -3529,7 +3754,7 @@ window.deleteRetailSavedInvoice = function(index) {
 
 // ==================== طباعة فاتورة قطاعي (نفس شكل التجار) ====================
 // ==================== طباعة فاتورة قطاعي ====================
-window.printRetailSavedInvoice = function(index) {
+window.printRetailSavedInvoice = async function(index) {
     const inv = savedRetailInvoices[index];
     if (!inv) return;
 
@@ -3569,6 +3794,8 @@ window.printRetailSavedInvoice = function(index) {
                         ${printItemsRows(group.items)}
         `).join('')
         : printItemsRows(inv.items);
+
+    const fbQr = await ensureFacebookQr();
 
     const html = `
         <html dir="rtl" lang="ar">
@@ -3719,9 +3946,9 @@ window.printRetailSavedInvoice = function(index) {
 
             <div style="margin-top: 50px; text-align: center; color: #666; font-size: 13px;">
                 شكرًا لتعاملك مع مصطفى الازهرى للادوات الصحية<br>
-                برجاء الاحتفاظ بالفاتورة <br>
-                للاستفساراتصل على : 01002908735 او 01119032231
+                برجاء الاحتفاظ بالفاتورة
             </div>
+            ${shopPrintFooterHtml(fbQr, '#14B8A6')}
         </body>
         </html>
     `;
@@ -3994,6 +4221,43 @@ function addToRetailInvoice() {
 
     const variant = product.variants.find(v => v.size === size);
     if (!variant) return alert(' المقاس غير موجود');
+
+    // ==== لو المنتج ده اتباع قبل كده في نفس الفاتورة، بياخد نفس السعر اللي اتباع بيه هنا ====
+    // (السعر ده خاص بالفاتورة دي بس — أي فاتورة تانية هترجع للسعر الأساسي عادي)
+    const sameItemInInvoice = retailInvoice.find(it =>
+        it.productName === product.name && String(it.size) === String(size)
+    );
+    if (sameItemInInvoice) {
+        const rememberedPrice = Number(sameItemInInvoice.price) || 0;
+        retailInvoice.push({
+            id: Date.now() + Math.floor(Math.random() * 1000),
+            productName: product.name,
+            size: size,
+            basePrice: variant.price,
+            originalPrice: Number(variant.originalPrice) || 0,
+            price: rememberedPrice,
+            qty: qty,
+            subtotal: rememberedPrice * qty,
+            company: sameItemInInvoice.company || retailSelectedCompany || (Array.isArray(product.companies) ? product.companies[0] : ''),
+            isPercentGroup: !!sameItemInInvoice.isPercentGroup,
+            adjustType: sameItemInInvoice.adjustType,
+            adjustValue: sameItemInInvoice.adjustValue,
+            addedAt: retailSessionAddedAt
+        });
+
+        renderRetailTable();
+        if (typeof renderRetailPercentGroups === 'function') renderRetailPercentGroups();
+        updateRetailTotalAndRemaining();
+
+        if (qtyInput) qtyInput.value = 1;
+        const productInputSame = document.getElementById('retail-product-search');
+        if (productInputSame) productInputSame.value = '';
+        const sizeSelectSame = document.getElementById('retail-size-select');
+        if (sizeSelectSame) sizeSelectSame.innerHTML = '<option value="">اختر المقاس...</option>';
+
+        showToast(`اتضاف بسعر الفاتورة دي ${rememberedPrice.toFixed(2)} ج (السعر الأساسي ${Number(variant.price).toFixed(2)} ج)`, 'success');
+        return;
+    }
 
     const isPercentCompany = PERCENT_COMPANIES.includes(retailSelectedCompany);
 
