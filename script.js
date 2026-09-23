@@ -463,6 +463,7 @@ window.restoreTrashedInvoice = function(trashId) {
     const entry = trashedInvoices[idx];
     savedInvoices.push(entry.data);
     trashedInvoices.splice(idx, 1);
+    if (getInvoiceStockState(entry.data, 'invoice') === 'deducted') adjustStockForItems(getStockItemsForInvoice(entry.data), -1); // كانت متخصمة، فترجع تتخصم
     recalculateAllInvoicesForCustomer(entry.data.customer);
     saveAllInvoices();
     saveTrash();
@@ -486,7 +487,8 @@ window.restoreTrashedRetailInvoice = function(trashId) {
     const entry = trashedRetailInvoices[idx];
     savedRetailInvoices.push(entry.data);
     trashedRetailInvoices.splice(idx, 1);
-    adjustStockForItems(entry.data.items, -1); // رجّعت للفواتير الفعلية، فينقص المخزون تاني
+    // رجّعت للفواتير الفعلية: لو كانت متخصمة قبل الحذف ننقص المخزون تاني، ولو لسه متخصمتش منعملش حاجة
+    if (getInvoiceStockState(entry.data, 'retail') === 'deducted') adjustStockForItems(getStockItemsForInvoice(entry.data), -1);
     recalculateAllRetailInvoicesForCustomer(entry.data.customer);
     saveAllRetailInvoices();
     saveTrash();
@@ -1215,6 +1217,7 @@ function handleInvoiceCompanyChange() {
     if (sizeSelect) sizeSelect.innerHTML = '<option value="">اختر المقاس...</option>';
     const priceDisplay = document.getElementById('price-display');
     if (priceDisplay) priceDisplay.textContent = '0';
+    updateInvoiceStockDisplay();
 
     populateProductDatalist(invoiceSelectedCompany);
 }
@@ -1224,6 +1227,8 @@ function updatePriceDisplay() {
     const sizeSelect = document.getElementById('size-select');
     const priceDisplay = document.getElementById('price-display');
     if (!productInput || !sizeSelect || !priceDisplay) return;
+
+    updateInvoiceStockDisplay();   // الكمية المتاحة في المخزن (للشاشة بس)
 
     const productName = productInput.value.trim();
     const size = sizeSelect.value;
@@ -1288,6 +1293,7 @@ function renderInvoiceTable() {
             <td class="py-5 px-6 text-center text-lg">${item.size}</td>
             <td class="py-5 px-6 text-center">${item.price}</td>
             <td class="py-5 px-6 text-center text-lg font-medium">${item.qty}</td>
+            <td class="py-5 px-6 text-center no-print">${stockBadgeHtml(item)}</td>
             <td class="py-5 px-6 text-center font-bold">${item.subtotal}</td>
             <td class="py-5 px-6 text-center no-print">
                 <button onclick="removeFromInvoice(${index})" class="icon-btn-sm !text-[var(--danger)]">${icon('trash')}</button>
@@ -1367,6 +1373,8 @@ function saveCurrentInvoice() {
 
     const { currentTotal, discount } = updateTotalAndRemaining();
 
+    const oldInvoice = editingInvoiceIndex !== null ? savedInvoices[editingInvoiceIndex] : null;
+
     const invoice = {
         customer,
         items: JSON.parse(JSON.stringify(currentInvoice)),
@@ -1383,9 +1391,22 @@ function saveCurrentInvoice() {
         invoice.returns = JSON.parse(JSON.stringify(savedInvoices[editingInvoiceIndex].returns));
     }
 
+    // المخزون: الفاتورة الجديدة بتتحفظ "لسه متخصمتش"، والخصم بيتم بزرار "تم التسليم" بس.
     if (editingInvoiceIndex !== null) {
-        savedInvoices[editingInvoiceIndex] = invoice;
+        const oldState = getInvoiceStockState(oldInvoice, 'invoice');
+        if (oldState === 'deducted') {
+            // فاتورة اتسلّمت واتخصمت قبل كده وبتتعدل: نظبط المخزن على فرق الكميات بس
+            adjustStockForItems(getStockItemsForInvoice(oldInvoice), +1);
+            invoice.stockDeducted = true;
+            if (oldInvoice.stockDeductedAt) invoice.stockDeductedAt = oldInvoice.stockDeductedAt;
+            savedInvoices[editingInvoiceIndex] = invoice;
+            adjustStockForItems(getStockItemsForInvoice(invoice), -1);
+        } else {
+            if (oldState === 'pending') invoice.stockDeducted = false;   // 'untracked' (فاتورة قديمة) بتفضل من غير علامة
+            savedInvoices[editingInvoiceIndex] = invoice;
+        }
     } else {
+        invoice.stockDeducted = false;
         savedInvoices.push(invoice);
     }
 
@@ -1560,6 +1581,8 @@ function buildInvoiceCardHTML(inv, index) {
                 <div class="text-gray-500 text-sm">${formattedDate} - ${formattedTime}</div>
             </div>
 
+            ${stockStatusBlockHtml(inv, 'invoice', index)}
+
             <button onclick="toggleInvoiceDetails(${index})"
                     class="text-blue-600 underline mb-3">
                 عرض المنتجات
@@ -1624,6 +1647,7 @@ function buildInvoiceCardHTML(inv, index) {
 
                 <!-- أزرار -->
                 <div class="inv-actions no-print">
+                    ${stockUndoButtonHtml(inv, 'invoice', index)}
                     <button onclick="openReturnsModal('invoice', ${index})" class="inv-act inv-act-purple">↩ مرتجع</button>
                     <button onclick="printSavedInvoice(${index})" class="inv-act inv-act-blue">🖨 طباعة</button>
                     <button onclick="editSavedInvoice(${index})" class="inv-act inv-act-amber">✎ تعديل</button>
@@ -1703,6 +1727,8 @@ function deleteSavedInvoice(index) {
     if (!confirm('هل أنت متأكد من حذف هذه الفاتورة؟ (هتتنقل لسلة المحذوفات ولو محدش رجّعها هتتحذف نهائي بعد 30 يوم)')) return;
     const invoice = savedInvoices[index];
     if (!invoice) return;
+    // لو الفاتورة كانت اتخصمت من المخزن، الكميات ترجع لما تتحذف
+    if (getInvoiceStockState(invoice, 'invoice') === 'deducted') adjustStockForItems(getStockItemsForInvoice(invoice), +1);
     savedInvoices.splice(index, 1);
     trashedInvoices.push({ trashId: makeTrashId(), deletedAt: Date.now(), data: JSON.parse(JSON.stringify(invoice)) });
     saveAllInvoices();        //  Firebase
@@ -1773,6 +1799,7 @@ async function printSavedInvoice(index) {
                     font-family: 'Cairo', Arial, sans-serif; 
                     padding: 30px; 
                     line-height: 1.6;
+                    font-size: 15px;
                 }
                 .header {
                     text-align: center;
@@ -1781,7 +1808,7 @@ async function printSavedInvoice(index) {
                     padding-bottom: 15px;
                 }
                 .shop-name {
-                    font-size: 28px;
+                    font-size: 26px;
                     font-weight: bold;
                     color: #1E3A5F;
                 }
@@ -1792,7 +1819,7 @@ async function printSavedInvoice(index) {
                 }
                 th, td {
                     border: 1px solid #333;
-                    padding: 12px;
+                    padding: 9px;
                     text-align: center;
                 }
                 th {
@@ -1831,17 +1858,17 @@ async function printSavedInvoice(index) {
                 }
                 .summary-row {
                     display: flex; align-items: center; justify-content: space-between;
-                    padding: 10px 18px; border-bottom: 1px solid #E5E7EB; font-size: 16px; color: #374151;
+                    padding: 9px 18px; border-bottom: 1px solid #E5E7EB; font-size: 15px; color: #374151;
                 }
                 .summary-row:last-child { border-bottom: none; }
                 .summary-row.strong { font-weight: 700; color: #111827; background: #F9FAFB; }
                 .summary-row .red { font-weight: 700; color: #dc2626; }
                 .summary-row .green { font-weight: 700; color: #16a34a; }
                 .summary-row.final {
-                    padding: 16px 18px; font-size: 19px; font-weight: 800;
+                    padding: 14px 18px; font-size: 17px; font-weight: 800;
                     border-top: 2px solid #1E3A5F;
                 }
-                .summary-row.final span:last-child { font-size: 22px; }
+                .summary-row.final span:last-child { font-size: 20px; }
                 .summary-row.final.due { background: #FEF2F2; color: #b91c1c; }
                 .summary-row.final.clear { background: #F0FDF4; color: #15803d; }
                 .summary-note { padding: 6px 18px 12px; font-size: 12.5px; color: #92400E; text-align: center; }
@@ -2026,6 +2053,7 @@ function listenToDataChanges() {
                 applyProductsFilter();
                 populateProductDatalist();
                 populateRetailProductDatalist(retailSelectedCompany);
+                refreshAllStockViews();
             }
         });
 
@@ -2190,9 +2218,24 @@ function computeRetailInvoiceProfit(items) {
 //    الفرق ده كمان بيتخصم من المكسب. مثال: فاتورة إجمالي 110، مكسبها 30، اتدفع منها 100
 //    بس، وبعدين اتحطت خالصة  الفرق (10) بينزل من المكسب فيبقى 20.
 // لو رجعنا وألغينا "خالصة" أو شلنا الخصم، المكسب يرجع زي ما كان من غير خصم.
+// فاتورة أغلب منتجاتها "بحر أحمر": الخصم و"اعتبارها خالصة" ميتخصموش من المكسب.
+// المقارنة بعدد المنتجات (كل منتج+مقاس بيتعد مرة واحدة) مش بالكميات:
+//   منتجات البحر الأحمر أكتر من باقي المنتجات (أو الفاتورة كلها بحر أحمر) → الخصم/خالصة ميأثروش على المكسب
+//   غير كده (أقل أو متساوية) → الخصم/خالصة بينزلوا من المكسب عادي
+function isRedSeaMajorityInvoice(inv) {
+    if (!inv || !Array.isArray(inv.items)) return false;
+    const red = new Set(), other = new Set();
+    inv.items.forEach(item => {
+        const key = itemReturnKey(item);
+        (item.company === 'redsea' ? red : other).add(key);
+    });
+    return red.size > other.size;
+}
+
 function computeRetailInvoiceProfitAdjusted(inv) {
     if (!inv) return 0;
     let profit = computeRetailInvoiceProfit(inv.items);
+    if (isRedSeaMajorityInvoice(inv)) return profit;   // من غير خصم ولا أثر "خالصة"
 
     const discount = Number(inv.discount) || 0;
     if (discount > 0) profit -= discount;
@@ -2233,6 +2276,9 @@ function buildRetailProfitByDay() {
             const key = toLocalDateKey(ts);
             map[key] = (map[key] || 0) + profit;
         });
+
+        // فاتورة أغلب منتجاتها بحر أحمر: الخصم و"خالصة" ميأثروش على المكسب
+        if (isRedSeaMajorityInvoice(inv)) return;
 
         const invDateKey = toLocalDateKey(Number(inv.date) || Date.now());
 
@@ -2540,6 +2586,7 @@ function handleRetailCompanyChange() {
     populateRetailProductDatalist(retailSelectedCompany);
     toggleRetailAdjustmentUI();
     renderRetailStaging();
+    updateRetailStockDisplay();
 }
 
 function populateRetailProductDatalist(companyId = '') {
@@ -2602,7 +2649,10 @@ function renderRetailStaging() {
                 <div class="flex items-center justify-between bg-white rounded-xl border border-rose-100 px-3 py-2.5">
                     <div class="min-w-0">
                         <div class="font-semibold text-sm truncate">${item.productName}</div>
-                        <div class="text-xs text-slate-400">${item.size} — ${Number(item.basePrice).toFixed(2)} جنيه للوحدة</div>
+                        <div class="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
+                            <span>${item.size} — ${Number(item.basePrice).toFixed(2)} جنيه للوحدة</span>
+                            <span class="no-print">المخزن: ${stockBadgeHtml(item, retailSelectedCompany)}</span>
+                        </div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
                         <input type="number" min="1" value="${item.qty}"
@@ -2773,6 +2823,7 @@ function handleRetailProductSearch(val) {
     const sizeSelect = document.getElementById('retail-size-select');
     if (!sizeSelect) return;
     sizeSelect.innerHTML = '<option value="">اختر المقاس...</option>';
+    updateRetailStockDisplay();
 
     // إصلاح مشكلة شائعة في المتصفح: بعد ما تختار منتج وتمسح الكتابة، قائمة الاقتراحات
     // ممكن متظهرش تاني إلا لو دوست برة الخانة ووقفت عليها من جديد. الحل إننا نعيد
@@ -2830,6 +2881,7 @@ function renderRetailTable() {
                 </div>
                 <span class="hidden print:inline text-lg font-medium">${item.qty}</span>
             </td>
+            <td class="py-5 px-6 text-center no-print">${stockBadgeHtml(item)}</td>
             <td class="py-5 px-6 text-center font-bold">${item.subtotal.toFixed(2)}</td>
             <td class="py-5 px-6 text-center no-print">
                 <button onclick="removeRetailItemById(${item.id})" class="icon-btn-sm !text-[var(--danger)]">${icon('trash')}</button>
@@ -2948,6 +3000,7 @@ function renderRetailPercentGroups() {
                             <th class="no-print">السعر الأصلي</th>
                             <th>السعر</th>
                             <th>الكمية</th>
+                            <th class="no-print">المتاح بالمخزن</th>
                             <th>الإجمالي</th>
                             <th class="no-print">حذف</th>
                         </tr>
@@ -2969,6 +3022,7 @@ function renderRetailPercentGroups() {
                                     </div>
                                     <span class="hidden print:inline">${item.qty}</span>
                                 </td>
+                                <td class="py-4 px-4 text-center no-print">${stockBadgeHtml(item)}</td>
                                 <td class="py-4 px-4 text-center font-bold">${item.subtotal.toFixed(2)}</td>
                                 <td class="py-4 px-4 text-center no-print">
                                     <button onclick="removeRetailItemById(${item.id})" class="icon-btn-sm !text-[var(--danger)]">${icon('trash')}</button>
@@ -3100,7 +3154,204 @@ function adjustStockForItems(items, sign) {
     if (changed) {
         saveProducts();
         renderProducts();
+        refreshAllStockViews();
     }
+}
+
+// ==================== حالة خصم المخزون للفاتورة ====================
+// الفاتورة بتتحفظ من غير ما تخصم من المخزن. الخصم بيحصل بس لما تدوسي "تم التسليم".
+//   stockDeducted === true   → اتخصمت من المخزن
+//   stockDeducted === false  → محفوظة بس لسه مخصمتش (مستنية زرار "تم التسليم")
+//   undefined (فاتورة قديمة من قبل التعديل ده):
+//       قطاعي: كانت بتخصم وقت الحفظ، فبنعتبرها "اتخصمت"
+//       تجار : عمرها ما كانت بتخصم، فبنسيبها زي ما هي من غير زرار
+function getInvoiceStockState(inv, kind) {
+    if (!inv) return 'untracked';
+    if (inv.stockDeducted === true) return 'deducted';
+    if (inv.stockDeducted === false) return 'pending';
+    return kind === 'retail' ? 'deducted' : 'untracked';
+}
+
+// المنتجات اللي المفروض تتخصم/ترجع للمخزن لفاتورة = كميات الفاتورة بعد طرح اللي اترجّع منها
+function getStockItemsForInvoice(inv) {
+    const returned = {};
+    getInvoiceReturns(inv).forEach(r => {
+        returned[r.key] = (returned[r.key] || 0) + (Number(r.qty) || 0);
+    });
+    const out = [];
+    (Array.isArray(inv && inv.items) ? inv.items : []).forEach(item => {
+        const key = itemReturnKey(item);
+        let qty = Number(item.qty) || 0;
+        const takeOff = Math.min(qty, returned[key] || 0);
+        returned[key] = (returned[key] || 0) - takeOff;
+        qty -= takeOff;
+        if (qty > 0) out.push({ ...item, qty });
+    });
+    return out;
+}
+
+function persistInvoiceStockChange(kind) {
+    if (kind === 'retail') {
+        saveAllRetailInvoices();
+        filterRetailInvoicesByCustomer();   // بيحافظ على البحث الحالي لو مكتوب
+    } else {
+        saveAllInvoices();
+        filterInvoicesByCustomer();
+    }
+}
+
+// زرار "تم التسليم": بيخصم كميات الفاتورة من المخزن (مرة واحدة بس)
+window.markInvoiceStockDelivered = function (kind, index) {
+    const inv = getInvoiceByKind(kind, index);
+    if (!inv) return;
+    if (getInvoiceStockState(inv, kind) !== 'pending') return;
+
+    const items = getStockItemsForInvoice(inv);
+
+    // تجميع الكميات المطلوبة لكل منتج/مقاس عشان نحذّر لو أكتر من المتاح
+    const need = new Map();
+    items.forEach(item => {
+        const key = itemReturnKey(item);
+        if (!need.has(key)) need.set(key, { item, qty: 0 });
+        need.get(key).qty += Number(item.qty) || 0;
+    });
+    const shortages = [];
+    need.forEach(({ item, qty }) => {
+        const stock = getStockForItem(item);
+        if (stock !== null && qty > stock) {
+            shortages.push(`• ${item.productName} (${item.size}): المطلوب ${qty} والمتاح ${formatStockNumber(stock)}`);
+        }
+    });
+
+    let msg = 'تأكيد التسليم؟\nكميات الفاتورة دي هتتخصم من المخزن دلوقتي.';
+    if (shortages.length > 0) {
+        msg = 'تنبيه: الكمية المطلوبة أكبر من المتاح في المخزن:\n' + shortages.join('\n')
+            + '\n\nتكمّلي وتخصمي من المخزن برضه؟ (المخزون هيقف عند صفر)';
+    }
+    if (!confirm(msg)) return;
+
+    adjustStockForItems(items, -1);
+    inv.stockDeducted = true;
+    inv.stockDeductedAt = Date.now();
+    persistInvoiceStockChange(kind);
+    showToast(' تم خصم الفاتورة من المخزن', 'success');
+};
+
+// تراجع لو الزرار اتداس بالغلط: بيرجّع الكميات للمخزن وتبقى الفاتورة "لسه متخصمتش"
+window.undoInvoiceStockDelivered = function (kind, index) {
+    const inv = getInvoiceByKind(kind, index);
+    if (!inv) return;
+    if (getInvoiceStockState(inv, kind) !== 'deducted') return;
+    if (!confirm('هترجّعي كميات الفاتورة دي للمخزن وتبقى "لسه متخصمتش". متأكد؟')) return;
+
+    adjustStockForItems(getStockItemsForInvoice(inv), +1);
+    inv.stockDeducted = false;
+    delete inv.stockDeductedAt;
+    persistInvoiceStockChange(kind);
+    showToast(' اتلغى خصم المخزن ورجعت الكميات', 'warning');
+};
+
+// شريط حالة المخزن اللي بيظهر فوق كارت الفاتورة المحفوظة (للشاشة بس، مش بيتطبع)
+function stockStatusBlockHtml(inv, kind, index) {
+    const state = getInvoiceStockState(inv, kind);
+    if (state === 'untracked') return '';
+    if (state === 'pending') {
+        return `
+            <div class="no-print flex items-center justify-between gap-2 flex-wrap mb-3 px-3 py-2 rounded-xl border border-amber-200" style="background:#FFFBEB">
+                <span class="text-xs sm:text-sm font-semibold" style="color:#B45309">⏳ لسه متخصمتش من المخزن</span>
+                <button onclick="markInvoiceStockDelivered('${kind}', ${index})" class="inv-act inv-act-sm inv-act-green">📦 تم التسليم — اخصم من المخزن</button>
+            </div>`;
+    }
+    return `<div class="no-print text-xs font-semibold mb-2" style="color:#047857">✓ اتخصمت من المخزن</div>`;
+}
+
+function stockUndoButtonHtml(inv, kind, index) {
+    if (getInvoiceStockState(inv, kind) !== 'deducted') return '';
+    return `<button onclick="undoInvoiceStockDelivered('${kind}', ${index})" class="inv-act inv-act-sm">↺ إلغاء خصم المخزن</button>`;
+}
+
+// ==================== عرض المخزون جنب المنتج وقت تحضير الفاتورة ====================
+// للشاشة بس: كله بـ no-print، والطباعة بتتبني من بيانات الفاتورة المحفوظة (اللي مفيهاش مخزون أصلًا)
+function formatStockNumber(n) {
+    return String(Number((Number(n) || 0).toFixed(2)));
+}
+
+// بيرجّع الكمية المتاحة للمقاس، أو null لو مفيش بيانات مخزون للمقاس ده
+function getVariantStock(productName, size, companyId) {
+    if (!productName || !size) return null;
+    const variant = findProductVariant(productName, size, companyId || '');
+    if (!variant) return null;
+    if (variant.stock === undefined || variant.stock === null || variant.stock === '') return null;
+    return Number(variant.stock) || 0;
+}
+
+function getStockForItem(item, fallbackCompany) {
+    if (!item) return null;
+    return getVariantStock(item.productName, item.size, item.company || fallbackCompany || '');
+}
+
+function stockBadgeInfo(stock, qty) {
+    if (stock === null) return { text: '—', cls: 'stock-unknown', title: 'مفيش كمية مخزون مسجلة للمقاس ده' };
+    if (stock <= 0)     return { text: 'نفد', cls: 'stock-out', title: 'المخزون صفر' };
+    if (qty > stock)    return { text: formatStockNumber(stock) + ' ⚠', cls: 'stock-short', title: 'الكمية المطلوبة أكبر من المتاح' };
+    return { text: formatStockNumber(stock), cls: 'stock-ok', title: 'الكمية المتاحة في المخزن' };
+}
+
+function paintStockBadge(el, stock, qty) {
+    if (!el) return;
+    const info = stockBadgeInfo(stock, qty);
+    el.className = 'stock-badge no-print ' + info.cls;
+    el.title = info.title;
+    el.textContent = info.text;
+}
+
+function stockAttr(s) {
+    return String(s === undefined || s === null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// بادج المخزون جوه جداول الفاتورة (بيتحدث لوحده لو المخزون اتغير)
+function stockBadgeHtml(item, fallbackCompany) {
+    const company = item.company || fallbackCompany || '';
+    const qty = Number(item.qty) || 0;
+    const info = stockBadgeInfo(getVariantStock(item.productName, item.size, company), qty);
+    return `<span class="stock-badge no-print ${info.cls}" title="${info.title}" data-stock-badge`
+        + ` data-name="${stockAttr(item.productName)}" data-size="${stockAttr(item.size)}"`
+        + ` data-company="${stockAttr(company)}" data-qty="${qty}">${info.text}</span>`;
+}
+
+function updateInvoiceStockDisplay() {
+    const el = document.getElementById('stock-display');
+    if (!el) return;
+    const nameEl = document.getElementById('product-search');
+    const sizeEl = document.getElementById('size-select');
+    const qtyEl = document.getElementById('qty-input');
+    const name = nameEl ? nameEl.value.trim() : '';
+    const size = sizeEl ? sizeEl.value : '';
+    const qty = parseInt(qtyEl ? qtyEl.value : 0) || 0;
+    paintStockBadge(el, getVariantStock(name, size, invoiceSelectedCompany), qty);
+}
+
+function updateRetailStockDisplay() {
+    const el = document.getElementById('retail-stock-display');
+    if (!el) return;
+    const nameEl = document.getElementById('retail-product-search');
+    const sizeEl = document.getElementById('retail-size-select');
+    const qtyEl = document.getElementById('retail-qty-input');
+    const name = nameEl ? nameEl.value.trim() : '';
+    const size = sizeEl ? sizeEl.value : '';
+    const qty = parseInt(qtyEl ? qtyEl.value : 0) || 0;
+    paintStockBadge(el, getVariantStock(name, size, retailSelectedCompany), qty);
+}
+
+// تحديث كل عروض المخزون الظاهرة من غير ما نعيد رسم الجداول (عشان مانقطعش كتابة حد في خانة كمية)
+function refreshAllStockViews() {
+    document.querySelectorAll('[data-stock-badge]').forEach(el => {
+        const stock = getVariantStock(el.dataset.name, el.dataset.size, el.dataset.company || '');
+        paintStockBadge(el, stock, Number(el.dataset.qty) || 0);
+    });
+    updateInvoiceStockDisplay();
+    updateRetailStockDisplay();
 }
 
 function saveRetailInvoice() {
@@ -3148,15 +3399,24 @@ function saveRetailInvoice() {
         invoice.returns = JSON.parse(JSON.stringify(oldInvoice.returns));
     }
 
-    // المخزون بينقص بس لما الفاتورة تتحفظ نهائي
+    // المخزون: الفاتورة الجديدة بتتحفظ "لسه متخصمتش"، والخصم بيتم بزرار "تم التسليم" بس.
     if (editingRetailInvoiceIndex !== null) {
-        // فاتورة بتتعدل: رجّع كمية الفاتورة القديمة الأول، وبعدين انقص كمية الفاتورة الجديدة
-        if (oldInvoice) adjustStockForItems(oldInvoice.items, +1);
-        savedRetailInvoices[editingRetailInvoiceIndex] = invoice;
+        const oldState = getInvoiceStockState(oldInvoice, 'retail');
+        if (oldState === 'deducted') {
+            // فاتورة اتسلّمت واتخصمت قبل كده وبتتعدل: نظبط المخزن على فرق الكميات بس
+            adjustStockForItems(getStockItemsForInvoice(oldInvoice), +1);
+            invoice.stockDeducted = true;
+            if (oldInvoice.stockDeductedAt) invoice.stockDeductedAt = oldInvoice.stockDeductedAt;
+            savedRetailInvoices[editingRetailInvoiceIndex] = invoice;
+            adjustStockForItems(getStockItemsForInvoice(invoice), -1);
+        } else {
+            invoice.stockDeducted = false;
+            savedRetailInvoices[editingRetailInvoiceIndex] = invoice;
+        }
     } else {
+        invoice.stockDeducted = false;
         savedRetailInvoices.push(invoice);
     }
-    adjustStockForItems(invoice.items, -1);
 
     recalculateAllRetailInvoicesForCustomer(customer);
     saveAllRetailInvoices();
@@ -3400,6 +3660,7 @@ function buildRetailCardHTML(inv, index) {
                 <span class="hidden-price-value hidden">${invoiceProfit.toFixed(2)} جنيه</span>
                 <button type="button" onclick="toggleOriginalPriceCell(this)" title="إظهار/إخفاء المكسب" class="icon-btn-sm">${icon('eye')}</button>
             </div>
+            ${stockStatusBlockHtml(inv, 'retail', index)}
             <button onclick="toggleRetailInvoiceDetails(${index})" class="text-green-600 underline mb-3">عرض المنتجات</button>
             <div id="retail-invoice-details-${index}" class="hidden">
                 <table class="w-full text-right border-collapse mb-4">
@@ -3474,6 +3735,7 @@ function buildRetailCardHTML(inv, index) {
                                <button onclick="toggleRetailInvoiceSettled(${index})" class="inv-act inv-act-green">✓ اعتبارها خالصة</button>`
                             : `<span class="inv-badge-done">✓ تم السداد بالكامل</span>`)
                     }
+                    ${stockUndoButtonHtml(inv, 'retail', index)}
                     <button onclick="openReturnsModal('retail', ${index})" class="inv-act inv-act-purple">↩ مرتجع</button>
                     <button onclick="printRetailSavedInvoice(${index})" class="inv-act inv-act-blue">🖨 طباعة</button>
                     <button onclick="editRetailSavedInvoice(${index})" class="inv-act inv-act-amber">✎ تعديل</button>
@@ -3742,7 +4004,8 @@ window.cancelEditRetailInvoice = function() {
 window.deleteRetailSavedInvoice = function(index) {
     if (!confirm('هل أنت متأكد من حذف هذه الفاتورة القطاعية؟ (هتتنقل لسلة المحذوفات ولو محدش رجّعها هتتحذف نهائي بعد 30 يوم)')) return;
     const inv = savedRetailInvoices[index];
-    if (inv) adjustStockForItems(inv.items, +1); // رجّع الكمية للمخزون
+    // لو الفاتورة كانت اتخصمت من المخزن، الكميات ترجع لما تتحذف (ولو لسه متخصمتش منعملش حاجة)
+    if (inv && getInvoiceStockState(inv, 'retail') === 'deducted') adjustStockForItems(getStockItemsForInvoice(inv), +1);
     savedRetailInvoices.splice(index, 1);
     if (inv) trashedRetailInvoices.push({ trashId: makeTrashId(), deletedAt: Date.now(), data: JSON.parse(JSON.stringify(inv)) });
     saveAllRetailInvoices();
@@ -3807,7 +4070,7 @@ window.printRetailSavedInvoice = async function(index) {
                     padding: 30px; 
                     line-height: 1.6;
                     background: #f9fafb;
-                    font-size: 20px;
+                    font-size: 17px;
                 }
                 .header {
                     text-align: center;
@@ -3816,10 +4079,10 @@ window.printRetailSavedInvoice = async function(index) {
                     padding-bottom: 15px;
                 }
                 .header p {
-                    font-size: 17px;
+                    font-size: 15px;
                 }
                 .shop-name {
-                    font-size: 25px;
+                    font-size: 24px;
                     font-weight: bold;
                     color: #14B8A6;
                 }
@@ -3830,14 +4093,14 @@ window.printRetailSavedInvoice = async function(index) {
                 }
                 th, td {
                     border: 1px solid #333;
-                    padding: 10px;
+                    padding: 8px;
                     text-align: center;
                 }
                 th {
                     background-color: #F0FDFA;
                     font-weight: 600;
                     color: #0F766E;
-                    font-size: 17px;
+                    font-size: 15px;
                 }
                 .totals {
                     margin-top: 30px;
@@ -3869,17 +4132,17 @@ window.printRetailSavedInvoice = async function(index) {
                 }
                 .summary-row {
                     display: flex; align-items: center; justify-content: space-between;
-                    padding: 10px 18px; border-bottom: 1px solid #E5E7EB; font-size: 16px; color: #374151;
+                    padding: 9px 18px; border-bottom: 1px solid #E5E7EB; font-size: 15px; color: #374151;
                 }
                 .summary-row:last-child { border-bottom: none; }
                 .summary-row.strong { font-weight: 700; color: #111827; background: #F9FAFB; }
                 .summary-row .red { font-weight: 700; color: #dc2626; }
                 .summary-row .green { font-weight: 700; color: #16a34a; }
                 .summary-row.final {
-                    padding: 16px 18px; font-size: 19px; font-weight: 800;
+                    padding: 14px 18px; font-size: 17px; font-weight: 800;
                     border-top: 2px solid #14B8A6;
                 }
-                .summary-row.final span:last-child { font-size: 22px; }
+                .summary-row.final span:last-child { font-size: 20px; }
                 .summary-row.final.due { background: #FEF2F2; color: #b91c1c; }
                 .summary-row.final.clear { background: #F0FDF4; color: #15803d; }
                 .summary-note { padding: 6px 18px 12px; font-size: 12.5px; color: #92400E; text-align: center; }
@@ -3896,7 +4159,7 @@ window.printRetailSavedInvoice = async function(index) {
                 <p>رقم الفاتورة: #${index + 1} &nbsp;&nbsp;&nbsp; التاريخ: ${formattedDate} - ${formattedTime}</p>
             </div>
 
-            <div style="margin-bottom: 20px; font-size: 17px;">
+            <div style="margin-bottom: 20px; font-size: 15px;">
                 <strong>اسم العميل:</strong> ${inv.customer}
                 ${previousDebt > 0 ? `<span style="color:#dc2626;"> (عليه ${previousDebt.toFixed(2)} جنيه سابقًا)</span>` : ''}
             </div>
@@ -4191,6 +4454,7 @@ function updateRetailPriceDisplay() {
         if (adjustInput) adjustInput.value = 0;
         retailItemAdjustmentConfirmed = false;         // لازم يحط النسبة/المبلغ تاني قبل الإضافة
     }
+    updateRetailStockDisplay();   // الكمية المتاحة في المخزن (للشاشة بس)
 }
 
 // تطبيق التعديل تلقائياً عند الكتابة، وتأكيد إن اليوزر حط القيمة فعلاً قبل الإضافة
@@ -4254,6 +4518,7 @@ function addToRetailInvoice() {
         if (productInputSame) productInputSame.value = '';
         const sizeSelectSame = document.getElementById('retail-size-select');
         if (sizeSelectSame) sizeSelectSame.innerHTML = '<option value="">اختر المقاس...</option>';
+        updateRetailStockDisplay();
 
         showToast(`اتضاف بسعر الفاتورة دي ${rememberedPrice.toFixed(2)} ج (السعر الأساسي ${Number(variant.price).toFixed(2)} ج)`, 'success');
         return;
@@ -4281,6 +4546,7 @@ function addToRetailInvoice() {
         if (productInputStaging) productInputStaging.value = '';
         const sizeSelectStaging = document.getElementById('retail-size-select');
         if (sizeSelectStaging) sizeSelectStaging.innerHTML = '<option value="">اختر المقاس...</option>';
+        updateRetailStockDisplay();
 
         console.log(`تم إضافة ${product.name} للقائمة المؤقتة`);
         return;
@@ -4324,6 +4590,7 @@ function addToRetailInvoice() {
     if (productInputAfterAdd) productInputAfterAdd.value = '';
     const sizeSelectAfterAdd = document.getElementById('retail-size-select');
     if (sizeSelectAfterAdd) sizeSelectAfterAdd.innerHTML = '<option value="">اختر المقاس...</option>';
+    updateRetailStockDisplay();
 
     // تصفير التعديل بعد الإضافة، ولازم يتحط تاني قبل المنتج الجاي
     retailPriceAdjustment = 0;
@@ -4794,7 +5061,8 @@ window.submitReturns = function () {
     }
 
     const totalAmount = picked.reduce((s, p) => s + p.amount, 0);
-    const restock = !!RETURN_RESTOCK[kind];
+    // لو الفاتورة لسه متخصمتش من المخزن، المرتجع ميزودش المخزون (مفيش حاجة خرجت أصلًا)
+    const restock = !!RETURN_RESTOCK[kind] && getInvoiceStockState(inv, kind) !== 'pending';
     const msg = `هتسجلي مرتجع بقيمة ${totalAmount.toFixed(2)} جنيه`
         + (restock ? '\nوالكميات هترجع للمخزون تلقائيًا.' : '')
         + '\nتأكيد؟';
@@ -4845,7 +5113,7 @@ window.deleteReturnEntry = function (kind, index, returnId) {
     inv.returns = inv.returns.filter(r => String(r.id) !== String(returnId));
 
     // نرجّع المخزون لحالته قبل الإرجاع
-    if (RETURN_RESTOCK[kind]) {
+    if (RETURN_RESTOCK[kind] && getInvoiceStockState(inv, kind) !== 'pending') {
         adjustStockForItems([{
             productName: entry.productName,
             size: entry.size,
