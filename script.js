@@ -331,6 +331,8 @@ let retailEditingPaymentContext = null;  // { index, paymentId } — الدفع�
 // المنتج اللي isPipe = كميته بالمتر، وسعر المقاس = سعر المتر. الماسورة عندنا طولها pipeLength (الافتراضي 6 متر).
 // ==================== حماية التعديل/الحذف: كلمة سر، إلا في أول 100 ثانية ====================
 const EDIT_GRACE_SECONDS = 100;
+// القائمة المؤقتة (لازم نسبة قبل الإضافة) للبحر الأحمر / أكوا دلتا / Dr: مقفولة — المنتج بيتضاف للفاتورة على طول
+const PERCENT_STAGING_ENABLED = false;
 // أي حد يقدر يعدّل/يحذف خلال 100 ثانية من وقت الدفعة/الفاتورة (لتصحيح غلطة). بعد كده لازم كلمة السر.
 async function requireEditAccess(createdAt, reason) {
     const t = Number(createdAt) || 0;
@@ -1407,7 +1409,7 @@ function toggleInvoiceAdjustmentUI() {
     const perItemBlock = document.getElementById('invoice-per-item-adjust-block');
     const levelBlock = document.getElementById('invoice-level-adjust');
     if (!perItemBlock || !levelBlock) return;
-    if (PERCENT_COMPANIES.includes(invoiceSelectedCompany)) {
+    if (PERCENT_STAGING_ENABLED && PERCENT_COMPANIES.includes(invoiceSelectedCompany)) {
         perItemBlock.classList.add('hidden');
         levelBlock.classList.remove('hidden');
         const adjustInput = document.getElementById('invoice-price-adjust');
@@ -1495,7 +1497,7 @@ function addToInvoice() {
     }
 
     // الشركات الخاصة (البحر الأحمر / أكوا دلتا / Dr): قائمة مؤقتة والنسبة بتتحط بعدين
-    if (PERCENT_COMPANIES.includes(invoiceSelectedCompany)) {
+    if (PERCENT_STAGING_ENABLED && PERCENT_COMPANIES.includes(invoiceSelectedCompany)) {
         invoiceStaging.push({
             id: Date.now() + Math.floor(Math.random() * 1000),
             productName: product.name, ...pipeInfo, size: size,
@@ -2589,8 +2591,7 @@ function filterInvoicesByCustomer() {
     });
 }
 
-async function deleteSavedInvoice(index) {
-    if (savedInvoices[index] && !(await requireEditAccess(savedInvoices[index].date, 'حذف الفاتورة محمي — اكتبي كلمة السر:'))) return;
+function deleteSavedInvoice(index) {
     if (!confirm('هل أنت متأكد من حذف هذه الفاتورة؟ (هتتنقل لسلة المحذوفات ولو محدش رجّعها هتتحذف نهائي بعد 30 يوم)')) return;
     const invoice = savedInvoices[index];
     if (!invoice) return;
@@ -2605,10 +2606,9 @@ async function deleteSavedInvoice(index) {
     showToast(' تم نقل الفاتورة لسلة المحذوفات', 'error');
 }
 
-async function editSavedInvoice(index) {
+function editSavedInvoice(index) {
     const invoice = savedInvoices[index];
     if (!invoice) return;
-    if (!(await requireEditAccess(invoice.date, 'تعديل الفاتورة محمي — اكتبي كلمة السر:'))) return;
 
     if (!confirm('هل تريد تعديل هذه الفاتورة؟\nسيتم استبدال البيانات القديمة بالجديدة.')) return;
 
@@ -3527,7 +3527,7 @@ function toggleRetailAdjustmentUI() {
     const invoiceLevelBlock = document.getElementById('retail-invoice-level-adjust');
     if (!perItemBlock || !invoiceLevelBlock) return;
 
-    if (PERCENT_COMPANIES.includes(retailSelectedCompany)) {
+    if (PERCENT_STAGING_ENABLED && PERCENT_COMPANIES.includes(retailSelectedCompany)) {
         perItemBlock.classList.add('hidden');
         invoiceLevelBlock.classList.remove('hidden');
 
@@ -4847,10 +4847,9 @@ window.toggleRetailInvoiceDetails = function(index) {
 };
 
 // ==================== تعديل - حذف - طباعة ====================
-window.editRetailSavedInvoice = async function(index) {
+window.editRetailSavedInvoice = function(index) {
     const invoice = savedRetailInvoices[index];
     if (!invoice) return;
-    if (!(await requireEditAccess(invoice.date, 'تعديل الفاتورة محمي — اكتبي كلمة السر:'))) return;
     if (!confirm('هل تريد تعديل هذه الفاتورة القطاعية؟')) return;
 
     editingRetailInvoiceIndex = index;
@@ -4926,8 +4925,7 @@ window.cancelEditRetailInvoice = function() {
     showToast(' تم إلغاء التعديل', 'error');
 };
 
-window.deleteRetailSavedInvoice = async function(index) {
-    if (savedRetailInvoices[index] && !(await requireEditAccess(savedRetailInvoices[index].date, 'حذف الفاتورة محمي — اكتبي كلمة السر:'))) return;
+window.deleteRetailSavedInvoice = function(index) {
     if (!confirm('هل أنت متأكد من حذف هذه الفاتورة القطاعية؟ (هتتنقل لسلة المحذوفات ولو محدش رجّعها هتتحذف نهائي بعد 30 يوم)')) return;
     const inv = savedRetailInvoices[index];
     // لو الفاتورة كانت اتخصمت من المخزن، الكميات ترجع لما تتحذف (ولو لسه متخصمتش منعملش حاجة)
@@ -5456,7 +5454,7 @@ function addToRetailInvoice() {
         return;
     }
 
-    const isPercentCompany = PERCENT_COMPANIES.includes(retailSelectedCompany);
+    const isPercentCompany = PERCENT_STAGING_ENABLED && PERCENT_COMPANIES.includes(retailSelectedCompany);
 
     if (isPercentCompany) {
         // الشركات الخاصة (البحر الأحمر / أكوا دلتا / Dr): المنتج بيدخل قائمة مؤقتة من غير أي تعديل سعر هنا
@@ -5486,9 +5484,8 @@ function addToRetailInvoice() {
     }
 
     // === باقي الشركات: لازم اليوزر يحط نسبة الزيادة أو النقصان الأول قبل ما يضيف المنتج ===
-    if (!retailItemAdjustmentConfirmed) {
-        return alert(' لازم تحط نسبة الزيادة أو النقصان الأول (حتى لو صفر) قبل ما تضيف المنتج');
-    }
+    // النسبة مش إجبارية: بنقرا اللي في الخانة دلوقتي (الافتراضي صفر) وبنضيف على طول
+    applyRetailPriceAdjustment();
 
     let finalPrice = variant.price;
     if (retailAdjustmentType === 'percent') {
