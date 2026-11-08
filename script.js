@@ -9,6 +9,7 @@ let editingInvoiceIndex = null;   //  مهم جدًا
 let editingCompanies = [];        // لتخزين الشركات المختارة للمنتج
 let bulkEditCompany = null;     // الشركة اللي هنعدل أسعارها
 let bulkEditType = 'percent';   // 'percent' أو 'fixed'
+let bulkPriceKind = null;       // 'retail' (قطاعي) أو 'wholesale' (تجاري)
 let allCustomers = [];   // عشان نحفظ أسماء الزبائن السابقين
 let invoiceStaging = [];                       // قائمة مؤقتة (البحر الأحمر / أكوا دلتا / Dr) في فاتورة التاجر
 let invoiceStagingAdjustmentTouched = false;
@@ -32,10 +33,15 @@ function makeTrashId() {
    بعد ما تكتبي كلمة السر مرة، بتفضل مفتوحة 10 دقايق بس، وبعدها بتقفل لوحدها. */
 const APP_SECRET_PASSWORD = '1323@';
 const SECRET_VISIBLE_SECONDS = 100;   // بعدها بيتخفي كل حاجة وبيتطلب الباسورد تاني
-let __secretUnlockedUntil = 0;
+// كل شاشة محمية ليها قفلها المستقل (scope): كلمة السر اللي اتكتبت لشاشة ما بتفتحش أي شاشة تانية.
+// مثال: فتحتي تقرير الأرباح بالباسورد، ولما تفتحي لوحة المعلومات أو تعدلي الأسعار هتتطلب منك تاني.
+let __secretScopes = {};            // { scope: وقت انتهاء الفتح }
 let __secretAutoLockTimer = null;
 
-function isSecretUnlocked() { return Date.now() < __secretUnlockedUntil; }
+function isSecretUnlocked(scope) {
+    if (!scope) return false;
+    return Date.now() < (__secretScopes[scope] || 0);
+}
 window.isSecretUnlocked = isSecretUnlocked;
 
 // بيرجّع كل الأسعار/المكاسب المكشوفة لحالة الإخفاء تاني
@@ -54,7 +60,7 @@ function hideAllRevealedSecrets() {
 function scheduleSecretAutoLock() {
     if (__secretAutoLockTimer) clearTimeout(__secretAutoLockTimer);
     __secretAutoLockTimer = setTimeout(() => {
-        __secretUnlockedUntil = 0;
+        __secretScopes = {};
         hideAllRevealedSecrets();
         // لو مودال المنتج مفتوح أو لوحة المعلومات ظاهرة، نعيد رسمهم في حالة القفل
         const productModal = document.getElementById('product-modal');
@@ -104,11 +110,10 @@ function askSecretPassword(reason, opts) {
         const finish = ok => { box.remove(); resolve(ok); };
         const submit = () => {
             if (String(input.value).trim() === APP_SECRET_PASSWORD) {
-                // opts.noUnlock: التأكيد لمرة واحدة بس (زي الحذف) من غير ما نكشف الأسعار المحمية
-                if (!opts.noUnlock) {
-                    __secretUnlockedUntil = Date.now() + SECRET_VISIBLE_SECONDS * 1000;
-                    scheduleSecretAutoLock();
-                }
+                // opts.scope: بيفتح الشاشة دي بس لمدة 100 ثانية (مش أي شاشة تانية)
+                if (opts.scope) __secretScopes[opts.scope] = Date.now() + SECRET_VISIBLE_SECONDS * 1000;
+                // opts.noUnlock: تأكيد لمرة واحدة (زي الحذف) من غير أي إظهار. غير كده بنخفي اللي اتكشف بعد 100 ثانية
+                if (!opts.noUnlock) scheduleSecretAutoLock();
                 finish(true);
             } else {
                 err.textContent = 'كلمة السر غلط';
@@ -127,7 +132,7 @@ window.confirmWithPasswordOnce = function (reason) { return askSecretPassword(re
 
 // قفل فوري من غير ما تستني الـ 100 ثانية
 window.lockSecretNow = function () {
-    __secretUnlockedUntil = 0;
+    __secretScopes = {};
     if (__secretAutoLockTimer) { clearTimeout(__secretAutoLockTimer); __secretAutoLockTimer = null; }
     hideAllRevealedSecrets();
     if (typeof renderProducts === 'function') renderProducts();
@@ -137,7 +142,7 @@ window.lockSecretNow = function () {
 
 // فتح القفل ثم إعادة رسم الشاشة اللي محتاجة إذن
 window.unlockAndRender = async function (what) {
-    const ok = await askSecretPassword();
+    const ok = await askSecretPassword(undefined, { scope: what });
     if (!ok) return;
     if (what === 'variants' && typeof renderVariantsInModal === 'function') renderVariantsInModal();
     if (what === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
@@ -1116,7 +1121,7 @@ function renderVariantsInModal() {
             <div class="flex gap-3 items-center">
                 <div class="flex-1">
                     <label class="text-xs text-slate-400 mb-1 block">السعر الأصلي</label>
-                    ${isSecretUnlocked()
+                    ${isSecretUnlocked('variants')
                         ? `<input type="number" step="0.01" min="0" placeholder="السعر الأصلي" value="${variant.originalPrice || ''}" oninput="updateVariantOriginalPrice(${index}, this.value)" class="w-full px-4 py-3 rounded-xl border focus:border-blue-400 text-lg text-center">`
                         : `<button type="button" onclick="unlockAndRender('variants')" class="w-full px-4 py-3 rounded-xl border border-dashed bg-slate-50 text-slate-400 text-sm font-semibold">🔒 محمي — اضغطي لإدخال كلمة السر</button>`}
                 </div>
@@ -1271,7 +1276,14 @@ async function saveProduct() {
             const oldPrice = oldVariant ? (Number(oldVariant.originalPrice) || 0) : 0;
             return Math.abs(oldPrice - (Number(v.originalPrice) || 0)) > 0.001;
         });
-        if (originalPriceChanged && !(await requireSecret('السعر الأصلي اتغيّر — لازم كلمة السر عشان يتحفظ التعديل:'))) {
+        // تغيير سعر القطاعي أو التجاري لمقاس موجود بردو محتاج كلمة السر
+        const sellPriceChanged = !!existingProduct && cleanVariants.some(v => {
+            const oldVariant = (existingProduct.variants || []).find(ov => ov.size === v.size);
+            if (!oldVariant) return false;
+            return Math.abs((Number(oldVariant.price) || 0) - (Number(v.price) || 0)) > 0.001
+                || Math.abs((Number(oldVariant.wholesalePrice) || 0) - (Number(v.wholesalePrice) || 0)) > 0.001;
+        });
+        if ((originalPriceChanged || sellPriceChanged) && !(await requireSecret('تعديل الأسعار محمي — اكتبي كلمة السر عشان يتحفظ التعديل:', { noUnlock: true }))) {
             return; // الباسورد غلط أو اتلغى — الحفظ مبيحصلش خالص والمنتج بيفضل زي ما كان
         }
     }
@@ -3061,9 +3073,22 @@ function renderBulkCompanyButtons() {
     });
 }
 
-function openBulkPriceModal() {
+function setBulkPriceKind(kind) {
+    bulkPriceKind = kind;
+    const on = ['border-amber-500', 'bg-amber-50'];
+    const r = document.getElementById('btn-kind-retail');
+    const w = document.getElementById('btn-kind-wholesale');
+    if (r) { r.classList.remove(...on); if (kind === 'retail') r.classList.add(...on); }
+    if (w) { w.classList.remove(...on); if (kind === 'wholesale') w.classList.add(...on); }
+}
+window.setBulkPriceKind = setBulkPriceKind;
+
+async function openBulkPriceModal() {
+    // تعديل الأسعار محمي: لازم كلمة السر في كل مرة (من غير ما تفتح أي حاجة تانية)
+    if (!(await askSecretPassword('تعديل الأسعار محمي — اكتبي كلمة السر:', { noUnlock: true }))) return;
     bulkEditCompany = null;
     bulkEditType = 'percent';
+    setBulkPriceKind(null);
     
     // إعادة تعيين الأزرار
     renderBulkCompanyButtons();
@@ -3351,6 +3376,9 @@ function setBulkEditType(type) {
 }
 
 function applyBulkPriceChange() {
+    if (!bulkPriceKind) {
+        return alert(' اختاري الأول: هتعدلي أسعار القطاعي ولا أسعار التجاري');
+    }
     if (!bulkEditCompany) {
         return alert(' اختر الشركة أولاً');
     }
@@ -3372,7 +3400,8 @@ function applyBulkPriceChange() {
     else if (bulkEditType === 'fixed') actionText = `زيادة ${value} جنيه`;
     else if (bulkEditType === 'minus_fixed') actionText = `نقصان ${value} جنيه`;
 
-    const confirmMsg = `هل أنت متأكدة من  ${actionText} على كل أسعار منتجات شركة ${getCompanyLabel(bulkEditCompany)}؟`;
+    const kindText = bulkPriceKind === 'wholesale' ? 'أسعار التجاري' : 'أسعار القطاعي';
+    const confirmMsg = `هل أنت متأكدة من  ${actionText} على ${kindText} فقط لمنتجات شركة ${getCompanyLabel(bulkEditCompany)}؟`;
 
     if (!confirm(confirmMsg)) {
         return;   // المستخدم ضغط إلغاء
@@ -3384,36 +3413,27 @@ function applyBulkPriceChange() {
         if (!Array.isArray(product.companies)) return;
         
         if (product.companies.includes(bulkEditCompany)) {
+            let touched = false;
+            const calc = (oldVal) => {
+                let nv = oldVal;
+                if (bulkEditType === 'percent') nv = oldVal * (1 + value / 100);
+                else if (bulkEditType === 'minus_percent') nv = oldVal * (1 - value / 100);
+                else if (bulkEditType === 'fixed') nv = oldVal + value;
+                else if (bulkEditType === 'minus_fixed') nv = oldVal - value;
+                return Math.max(0, Math.round(nv * 100) / 100);   // منع السعر من يبقى سالب
+            };
             product.variants.forEach(variant => {
-                let newPrice = variant.price;
-
-                if (bulkEditType === 'percent') {
-                    newPrice = variant.price * (1 + value / 100);
-                } 
-                else if (bulkEditType === 'minus_percent') {
-                    newPrice = variant.price * (1 - value / 100);
-                } 
-                else if (bulkEditType === 'fixed') {
-                    newPrice = variant.price + value;
-                } 
-                else if (bulkEditType === 'minus_fixed') {
-                    newPrice = variant.price - value;
-                }
-
-                // منع السعر من يبقى سالب
-                variant.price = Math.max(0, Math.round(newPrice * 100) / 100);
-
-                // نفس التعديل على السعر التجاري (لو متحدد للمقاس ده)
-                if (Number(variant.wholesalePrice) > 0) {
-                    const w = Number(variant.wholesalePrice);
-                    let newW = w;
-                    if (bulkEditType === 'percent') newW = w * (1 + value / 100);
-                    else if (bulkEditType === 'minus_percent') newW = w * (1 - value / 100);
-                    else if (bulkEditType === 'fixed') newW = w + value;
-                    else if (bulkEditType === 'minus_fixed') newW = w - value;
-                    variant.wholesalePrice = Math.max(0, Math.round(newW * 100) / 100);
+                if (bulkPriceKind === 'retail') {
+                    // القطاعي بس — السعر التجاري ما بيتغيرش
+                    variant.price = calc(Number(variant.price) || 0);
+                    touched = true;
+                } else if (Number(variant.wholesalePrice) > 0) {
+                    // التجاري بس — المقاسات اللي ليها سعر تجاري متحدد، والقطاعي ما بيتغيرش
+                    variant.wholesalePrice = calc(Number(variant.wholesalePrice));
+                    touched = true;
                 }
             });
+            if (!touched) return;
             updatedCount++;
         }
     });
@@ -4967,7 +4987,6 @@ window.printRetailSavedInvoice = async function(index) {
                             <td>${qtyLabel(item)}</td>
                             <td>${item.productName}</td>
                             <td>${item.size}</td>
-                            <td>${Number(item.price).toFixed(2)}</td>
                             <td>${Number(item.subtotal).toFixed(2)}</td>
                         </tr>
     `).join('');
@@ -4975,7 +4994,7 @@ window.printRetailSavedInvoice = async function(index) {
     const printItemsHtml = itemGroups.length > 1
         ? itemGroups.map(group => `
                         <tr>
-                            <td colspan="5" style="background:#FEF3C7; text-align:right; font-weight:600; color:#92400E;">
+                            <td colspan="4" style="background:#FEF3C7; text-align:right; font-weight:600; color:#92400E;">
                                  أُضيف بتاريخ: ${formatRetailDateTime(group.date)}
                             </td>
                         </tr>
@@ -5095,7 +5114,6 @@ window.printRetailSavedInvoice = async function(index) {
                         <th>الكمية</th>
                         <th>المنتج</th>
                         <th>المقاس</th>
-                        <th>السعر</th>
                         <th>الإجمالي</th>
                     </tr>
                 </thead>

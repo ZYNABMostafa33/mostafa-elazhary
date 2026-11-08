@@ -299,7 +299,7 @@ function renderDashboard() {
     if (!root) return;
 
     // الصفحة دي فيها أرقام المبيعات والأرباح، فمقفولة بكلمة السر
-    if (typeof isSecretUnlocked === 'function' && !isSecretUnlocked()) {
+    if (typeof isSecretUnlocked === 'function' && !isSecretUnlocked('dashboard')) {
         root.innerHTML = `
             <div class="panel">
                 <div class="panel-body text-center py-14">

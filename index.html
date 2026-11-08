@@ -1439,6 +1439,22 @@
 
             <div class="p-5 sm:p-6 space-y-6 modal-body-scroll">
 
+                <!-- قطاعي ولا تجاري -->
+                <div>
+                    <label class="field-label">هتعدلي أسعار إيه؟</label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <button type="button" onclick="setBulkPriceKind('retail')" id="btn-kind-retail"
+                                class="py-4 rounded-xl border-2 border-slate-200 font-medium text-sm text-slate-600 transition-all">
+                            أسعار القطاعي
+                        </button>
+                        <button type="button" onclick="setBulkPriceKind('wholesale')" id="btn-kind-wholesale"
+                                class="py-4 rounded-xl border-2 border-slate-200 font-medium text-sm text-slate-600 transition-all">
+                            أسعار التجاري
+                        </button>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-2">التعديل بيتطبق على النوع اللي تختاريه بس، والتاني ما بيتأثرش.</p>
+                </div>
+
                 <!-- اختيار الشركة -->
                 <div>
                     <label class="field-label">اختر الشركة</label>
