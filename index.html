@@ -645,13 +645,18 @@
         <div class="card-pad mb-4">
             <div class="mb-6">
                 <label class="field-label">اسم التاجر</label>
-                <input
-                    type="text"
-                    id="customer-name"
-                    list="customers-datalist"
-                    placeholder="اسم التاجر"
-                    class="input-base"
-                    oninput="updateInvoiceHeader()">
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <input
+                        type="text"
+                        id="customer-name"
+                        list="customers-datalist"
+                        placeholder="اسم التاجر"
+                        class="input-base flex-1"
+                        oninput="updateInvoiceHeader()">
+                    <div id="invoice-customer-balance"
+                         class="px-5 py-3 rounded-xl text-sm font-medium flex items-center justify-center min-w-[180px] bg-slate-50 text-slate-500">
+                    </div>
+                </div>
                 <datalist id="customers-datalist"></datalist>
             </div>
 
@@ -712,7 +717,8 @@
                     <div class="flex gap-2">
                         <input id="qty-input"
                                type="number"
-                               min="1"
+                               step="any"
+                               min="0.1"
                                value="1"
                                oninput="updateInvoiceStockDisplay()"
                                class="input-base text-center">
@@ -723,12 +729,54 @@
                 </div>
             </div>
 
+            <div id="invoice-pipe-hint" class="hidden text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 mt-3"></div>
+
+            <!-- تعديل السعر (زيادة أو نقصان) — زي القطاعي -->
+            <div id="invoice-per-item-adjust-block" class="bg-rose-50 border border-rose-100 rounded-2xl p-4 mt-4 mb-4">
+                <label class="block text-sm font-semibold mb-3 text-rose-600">تعديل السعر للتاجر (زيادة أو نقصان)</label>
+                <div class="flex flex-col sm:flex-row gap-3 items-end">
+                    <div class="flex-1 w-full">
+                        <select id="invoice-price-type" class="input-base">
+                            <option value="percent">نسبة مئوية %</option>
+                            <option value="fixed">مبلغ ثابت (جنيه)</option>
+                        </select>
+                    </div>
+                    <div class="flex-1 w-full">
+                        <input id="invoice-price-adjust" type="number" step="0.01" value="0" placeholder="0" class="input-base text-center">
+                    </div>
+                </div>
+            </div>
+
             <div class="text-sm text-slate-400 mb-2">
                 السعر الحالي: <span id="price-display" class="font-bold text-brand-700">0</span> جنيه
                 <span class="no-print mx-2 text-slate-300">|</span>
                 <span class="no-print">المتاح بالمخزن: <span id="stock-display" class="stock-badge no-print stock-unknown">—</span></span>
             </div>
         </div>
+
+        <!-- القائمة المؤقتة + تعديل السعر على مستوى القائمة (البحر الأحمر / أكوا دلتا / Dr) -->
+        <div id="invoice-level-adjust" class="hidden bg-rose-50 border border-rose-100 rounded-2xl p-4 sm:p-5 mb-4">
+            <div id="invoice-staging-container" class="mb-2">
+                <p class="text-sm text-rose-300 mb-4"> اختار منتج</p>
+            </div>
+            <label class="block text-sm font-semibold mb-3 text-rose-600">تعديل السعر على المنتجات دي كلها </label>
+            <div class="flex flex-col sm:flex-row gap-3 items-end">
+                <div class="flex-1 w-full">
+                    <select id="invoice-level-adjust-type" class="input-base">
+                        <option value="percent">نسبة مئوية %</option>
+                        <option value="fixed">مبلغ ثابت  (جنيه)</option>
+                    </select>
+                </div>
+                <div class="flex-1 w-full">
+                    <input id="invoice-level-adjust-value" type="number" step="0.01" value="0" placeholder="0"
+                           oninput="invoiceStagingAdjustmentTouched = true" class="input-base text-center">
+                </div>
+                <button onclick="commitInvoiceStagingToInvoice()" class="btn-rose shrink-0 w-full sm:w-auto">إضافة للفاتورة</button>
+            </div>
+        </div>
+
+        <!-- مربعات الشركات (البحر الأحمر / أكوا دلتا / Dr) -->
+        <div id="invoice-percent-groups"></div>
 
         <!-- جدول الفاتورة الحالية -->
         <div class="card overflow-hidden mb-4">
@@ -750,6 +798,7 @@
                             <th class="text-right">المنتج</th>
                             <th class="no-print">الشركة</th>
                             <th>المقاس</th>
+                            <th class="no-print">السعر الأصلي</th>
                             <th>السعر</th>
                             <th>الكمية</th>
                             <th class="no-print">المتاح بالمخزن</th>
@@ -826,9 +875,13 @@
             </div>
         </div>
 
-        <button onclick="saveCurrentInvoice()" class="btn-primary w-full text-lg py-4 mb-6">
+        <button onclick="saveCurrentInvoice()" class="btn-primary w-full text-lg py-4 mb-3">
             حفظ الفاتورة كاملة
         </button>
+        <button id="cancel-edit-invoice-btn" onclick="cancelEditInvoice()" class="hidden btn-secondary w-full text-lg py-3 mb-6">
+            ❌ إلغاء التعديل والرجوع كما كانت
+        </button>
+        <div class="mb-6"></div>
 
         <!-- بحث الفواتير السابقة -->
         <div class="relative mb-4">
@@ -926,7 +979,8 @@
                     <div class="flex gap-2">
                         <input id="retail-qty-input"
                                type="number"
-                               min="1"
+                               step="any"
+                               min="0.1"
                                value="1"
                                oninput="updateRetailStockDisplay()"
                                class="input-base text-center focus:border-rose-500 focus:ring-rose-500/10">
@@ -937,6 +991,7 @@
                 </div>
             </div>
 
+            <div id="retail-pipe-hint" class="hidden text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 mt-3"></div>
             <div class="no-print text-sm text-slate-400 mt-1">
                 المتاح بالمخزن: <span id="retail-stock-display" class="stock-badge no-print stock-unknown">—</span>
             </div>
@@ -1282,6 +1337,19 @@
                         🏢 اختيار / إدارة الشركات
                     </button>
                 </div>
+                <!-- ماسورة بالمتر -->
+                <div class="mb-6 bg-blue-50 border border-blue-100 rounded-2xl p-4">
+                    <label class="flex items-center gap-3 cursor-pointer font-semibold text-slate-700">
+                        <input type="checkbox" id="product-is-pipe" onchange="onPipeToggle()" class="w-5 h-5">
+                        المنتج ده مواسير (بيتباع بالمتر)
+                    </label>
+                    <div id="product-pipe-length-box" class="hidden mt-3">
+                        <label class="field-label">طول الماسورة الواحدة (بالمتر)</label>
+                        <input id="product-pipe-length" type="number" step="0.1" min="0.1" value="6" class="input-base text-center">
+                        <p class="text-xs text-slate-400 mt-2 leading-relaxed">السعر اللي بتكتبيه للمقاس هو سعر المتر، والكمية بالمخزن بالمتر. لو الزبون طلب 7 متر هيظهر "ماسورة + 1 متر".</p>
+                    </div>
+                </div>
+
                 <div>
                     <div class="flex justify-between items-center mb-3">
                         <label class="font-semibold text-slate-700">المقاسات والأسعار</label>
@@ -1465,7 +1533,7 @@
                     <button onclick="recalculateOldInvoicesProfit()" class="btn-secondary w-full !py-3 text-sm">
                         🔄 إعادة حساب مكسب الفواتير القديمة بالسعر الأصلي الحالي
                     </button>
-                    <p class="text-xs text-slate-400 mt-2 text-center">هيحدّث مكسب كل الفواتير القطاعي المحفوظة بناءً على السعر الأصلي المسجل دلوقتي على كل منتج.</p>
+                    <p class="text-xs text-slate-400 mt-2 text-center">هيحدّث مكسب كل الفواتير المحفوظة (قطاعي وتجار) بناءً على السعر الأصلي المسجل دلوقتي على كل منتج.</p>
                 </div>
 
             </div>

@@ -237,7 +237,7 @@ function computeDashboard() {
     const salesValue = all.reduce((s, x) => s + getNetTotal(x.inv), 0);
 
     let profit = 0;
-    (savedRetailInvoices || []).forEach(inv => {
+    (savedRetailInvoices || []).concat(savedInvoices || []).forEach(inv => {
         try { profit += computeRetailInvoiceProfitAdjusted(inv) || 0; } catch (e) { /* تجاهل */ }
     });
 
@@ -317,7 +317,7 @@ function renderDashboard() {
     root.innerHTML = `
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             ${kpi('إجمالي المبيعات', fmtMoney(d.salesValue) + '<span class="unit"> ج.م</span>', `${fmtNum(d.invoicesCount)} فاتورة`, 'trending', 'tone-accent')}
-            ${kpi('صافي الأرباح (قطاعي)', fmtMoney(d.profit) + '<span class="unit"> ج.م</span>', 'محسوبة من فواتير القطاعي', 'wallet', 'tone-success')}
+            ${kpi('صافي الأرباح', fmtMoney(d.profit) + '<span class="unit"> ج.م</span>', 'محسوبة من فواتير القطاعي والتجار', 'wallet', 'tone-success')}
             ${kpi('المستحقات على العملاء', fmtMoney(d.debtTotal) + '<span class="unit"> ج.م</span>', 'جملة + قطاعي', 'users', 'tone-danger')}
             ${kpi('إجمالي المخزون', fmtNum(d.unitsInStock) + '<span class="unit"> قطعة</span>', `${fmtNum(d.productsCount)} منتج · ${fmtNum(d.variants)} مقاس`, 'box', 'tone-primary')}
         </div>
@@ -539,6 +539,12 @@ window.renderProducts = function (filtered) {
                 ? fmtMoney(prices[0])
                 : `${fmtMoney(Math.min(...prices))} – ${fmtMoney(Math.max(...prices))}`)
             : '—';
+        const wPrices = product.variants.map(v => Number(v.wholesalePrice) || 0).filter(n => n > 0);
+        const wholesaleRange = wPrices.length
+            ? (Math.min(...wPrices) === Math.max(...wPrices)
+                ? fmtMoney(wPrices[0])
+                : `${fmtMoney(Math.min(...wPrices))} – ${fmtMoney(Math.max(...wPrices))}`)
+            : '—';
         const stock = product.variants.reduce((s, v) => {
             const has = v.stock !== undefined && v.stock !== null && v.stock !== '';
             return s + (has ? (Number(v.stock) || 0) : 0);
@@ -563,6 +569,7 @@ window.renderProducts = function (filtered) {
             <td class="cell text-center tabular hide-sm">${fmtNum(product.variants.length)}</td>
             <td class="cell text-center tabular font-semibold">${fmtNum(stock)}</td>
             <td class="cell text-center tabular hide-sm">${priceRange}</td>
+            <td class="cell text-center tabular hide-sm">${wholesaleRange}</td>
             <td class="cell text-center">${statusBadge(st)}</td>
             <td class="cell text-left no-print" onclick="event.stopPropagation()">
                 <div class="relative inline-block">
@@ -588,7 +595,8 @@ window.renderProducts = function (filtered) {
                             <th class="text-right hide-md">الشركة</th>
                             <th class="text-center hide-sm">المقاسات</th>
                             <th class="text-center">المخزون</th>
-                            <th class="text-center hide-sm">السعر</th>
+                            <th class="text-center hide-sm">سعر قطاعي</th>
+                            <th class="text-center hide-sm">سعر تجاري</th>
                             <th class="text-center">الحالة</th>
                             <th class="text-left no-print"></th>
                         </tr>
@@ -657,8 +665,10 @@ function openProductDrawer(id) {
                     <thead>
                         <tr>
                             <th class="text-right">المقاس</th>
-                            <th class="text-center">السعر</th>
+                            <th class="text-center">سعر قطاعي</th>
+                            <th class="text-center">سعر تجاري</th>
                             <th class="text-center no-print">سعر الشراء</th>
+                            <th class="text-center">الكود</th>
                             <th class="text-center">المخزون</th>
                             <th class="text-center">الحالة</th>
                             <th class="text-left no-print"></th>
@@ -672,6 +682,7 @@ function openProductDrawer(id) {
                             <tr>
                                 <td class="cell font-medium">${esc(v.size || '—')}</td>
                                 <td class="cell text-center tabular">${fmtMoney(v.price)}</td>
+                                <td class="cell text-center tabular">${Number(v.wholesalePrice) > 0 ? fmtMoney(v.wholesalePrice) : '<span class="text-ink-300">—</span>'}</td>
                                 <td class="cell text-center no-print">
                                     <div class="flex items-center justify-center gap-2">
                                         <span class="hidden-price-mask text-ink-300 select-none">••••</span>
@@ -679,6 +690,7 @@ function openProductDrawer(id) {
                                         <button type="button" class="icon-btn-sm" onclick="toggleOriginalPriceCell(this)">${icon('eye', 'w-4 h-4')}</button>
                                     </div>
                                 </td>
+                                <td class="cell text-center tabular text-ink-600">${esc(v.code || '—')}</td>
                                 <td class="cell text-center tabular">${v.stock === '' || v.stock === undefined || v.stock === null ? '—' : fmtNum(v.stock)}</td>
                                 <td class="cell text-center">${statusBadge(st)}</td>
                                 <td class="cell text-left no-print">
@@ -721,14 +733,28 @@ window.toggleProductDetails = function (id) { openProductDrawer(id); };
 
 /* ============================== 7) أكواد QR ============================== */
 
-// معرّف ثابت لكل مقاس: MA-<productId>-<size>
+// كود قصير لكل مقاس (٤ أرقام مثلًا 1001). الأكواد القديمة (MA-...) لسه بتتقرا عادي.
 function variantCode(productId, size) {
-    return `MA-${productId}-${String(size || '').trim()}`;
+    const product = (products || []).find(p => String(p.id) === String(productId));
+    const variant = product && (product.variants || []).find(v => String(v.size).trim() === String(size || '').trim());
+    if (variant && variant.code) return String(variant.code);
+    return `MA-${productId}-${String(size || '').trim()}`;   // احتياطي لو الكود لسه متولّدش
 }
 window.variantCode = variantCode;
 
 function parseVariantCode(code) {
     const raw = String(code || '').trim();
+
+    // الكود القصير الجديد
+    if (/^\d{3,6}$/.test(raw)) {
+        for (const p of (products || [])) {
+            const v = (p.variants || []).find(x => String(x.code) === raw);
+            if (v) return { product: p, variant: v };
+        }
+        return null;
+    }
+
+    // الكود القديم الطويل (للملصقات المطبوعة قبل كده)
     const m = raw.match(/^MA-(\d+)-(.+)$/);
     if (!m) return null;
     const product = (products || []).find(p => String(p.id) === m[1]);

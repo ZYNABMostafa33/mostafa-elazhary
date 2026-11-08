@@ -10,6 +10,9 @@ let editingCompanies = [];        // لتخزين الشركات المختار�
 let bulkEditCompany = null;     // الشركة اللي هنعدل أسعارها
 let bulkEditType = 'percent';   // 'percent' أو 'fixed'
 let allCustomers = [];   // عشان نحفظ أسماء الزبائن السابقين
+let invoiceStaging = [];                       // قائمة مؤقتة (البحر الأحمر / أكوا دلتا / Dr) في فاتورة التاجر
+let invoiceStagingAdjustmentTouched = false;
+let invoiceSessionAddedAt = Date.now();      // تاريخ إضافة المنتجات في جلسة الفاتورة الحالية
 let invoiceSelectedCompany = '';  // الشركة المختارة حاليًا في فاتورة الجملة (لتمييز المنتجات المتشابهة بالاسم)
 
 // ==================== سلة المحذوفات (منتجات / فواتير تجار / فواتير قطاعي) ====================
@@ -71,7 +74,8 @@ function scheduleSecretAutoLock() {
 }
 
 // صندوق كلمة السر (بيكتب نقط مش ظاهرة)، بيرجّع Promise<boolean>
-function askSecretPassword(reason) {
+function askSecretPassword(reason, opts) {
+    opts = opts || {};
     return new Promise(resolve => {
         const old = document.getElementById('secret-ask-modal');
         if (old) old.remove();
@@ -100,8 +104,11 @@ function askSecretPassword(reason) {
         const finish = ok => { box.remove(); resolve(ok); };
         const submit = () => {
             if (String(input.value).trim() === APP_SECRET_PASSWORD) {
-                __secretUnlockedUntil = Date.now() + SECRET_VISIBLE_SECONDS * 1000;
-                scheduleSecretAutoLock();
+                // opts.noUnlock: التأكيد لمرة واحدة بس (زي الحذف) من غير ما نكشف الأسعار المحمية
+                if (!opts.noUnlock) {
+                    __secretUnlockedUntil = Date.now() + SECRET_VISIBLE_SECONDS * 1000;
+                    scheduleSecretAutoLock();
+                }
                 finish(true);
             } else {
                 err.textContent = 'كلمة السر غلط';
@@ -115,7 +122,8 @@ function askSecretPassword(reason) {
         box.onclick = e => { if (e.target === box) finish(false); };
     });
 }
-window.requireSecret = askSecretPassword;   // اسم قديم متوافق، لكن دلوقتي بيرجّع Promise
+window.requireSecret = askSecretPassword;
+window.confirmWithPasswordOnce = function (reason) { return askSecretPassword(reason, { noUnlock: true }); };   // اسم قديم متوافق، لكن دلوقتي بيرجّع Promise
 
 // قفل فوري من غير ما تستني الـ 100 ثانية
 window.lockSecretNow = function () {
@@ -319,6 +327,108 @@ let retailStaging = [];   // قائمة مؤقتة لمنتجات الشركة �
 let retailSessionAddedAt = Date.now();   // كل المنتجات اللي بتتضاف في نفس جلسة العمل (فاتورة جديدة أو تعديل) بتاخد نفس التاريخ ده
 let retailEditingPaymentContext = null;  // { index, paymentId } — الدفعة اللي بتتعدل دلوقتي (لو فيه)
 
+// ==================== المواسير (بتتباع بالمتر) ====================
+// المنتج اللي isPipe = كميته بالمتر، وسعر المقاس = سعر المتر. الماسورة عندنا طولها pipeLength (الافتراضي 6 متر).
+// ==================== حماية التعديل/الحذف: كلمة سر، إلا في أول 100 ثانية ====================
+const EDIT_GRACE_SECONDS = 100;
+// أي حد يقدر يعدّل/يحذف خلال 100 ثانية من وقت الدفعة/الفاتورة (لتصحيح غلطة). بعد كده لازم كلمة السر.
+async function requireEditAccess(createdAt, reason) {
+    const t = Number(createdAt) || 0;
+    if (t && (Date.now() - t) <= EDIT_GRACE_SECONDS * 1000) return true;
+    return await confirmWithPasswordOnce(reason || 'التعديل أو الحذف محمي — اكتبي كلمة السر:');
+}
+window.requireEditAccess = requireEditAccess;
+
+function isPipeProduct(p) { return !!(p && p.isPipe); }
+function pipeLengthOf(p) { return Number(p && p.pipeLength) > 0 ? Number(p.pipeLength) : 6; }
+window.isPipeProduct = isPipeProduct;
+
+// بيحوّل الأمتار لـ "ماسورة كاملة + متر": 7 متر مع ماسورة 6م = ماسورة + 1 متر
+function pipeBreakdown(meters, len) {
+    meters = Number(meters) || 0; len = Number(len) > 0 ? Number(len) : 6;
+    const full = Math.floor(meters / len + 1e-9);
+    const rest = Math.round((meters - full * len) * 100) / 100;
+    return { meters, len, full, rest, pipesNeeded: Math.ceil(meters / len - 1e-9) };
+}
+function pipeBreakdownText(meters, len) {
+    const b = pipeBreakdown(meters, len);
+    const parts = [];
+    if (b.full > 0) parts.push(b.full === 1 ? 'ماسورة' : b.full + ' ماسورة');
+    if (b.rest > 0) parts.push(b.rest + ' متر');
+    return parts.join(' + ');
+}
+// نص الكمية في الفواتير: القطع كما هي، والمواسير "7 متر (ماسورة + 1 متر)"
+function qtyLabel(item) {
+    if (!item || !item.isPipe) return String(item ? item.qty : '');
+    const m = Number(item.qty) || 0;
+    const t = pipeBreakdownText(m, item.pipeLength);
+    return `${m} متر` + (t && m > pipeLengthOf(item) ? ` (${t})` : '');
+}
+window.qtyLabel = qtyLabel;
+function parseItemQty(v, id) {
+    const lists = [currentInvoice, invoiceStaging, retailInvoice, retailStaging];
+    let item = null;
+    for (const l of lists) { item = (l || []).find(i => i.id === id); if (item) break; }
+    const n = item && item.isPipe ? parseFloat(v) : parseInt(v);
+    return n > 0 ? n : 1;
+}
+// تلميح تحت خانة الكمية لما المنتج ماسورة
+function updatePipeHint(kind) {
+    const isRetail = kind === 'retail';
+    const hintEl = document.getElementById(isRetail ? 'retail-pipe-hint' : 'invoice-pipe-hint');
+    const qtyEl = document.getElementById(isRetail ? 'retail-qty-input' : 'qty-input');
+    const labelEl = qtyEl && qtyEl.closest('.flex') ? qtyEl.closest('.flex').previousElementSibling : null;
+    const name = (document.getElementById(isRetail ? 'retail-product-search' : 'product-search') || {}).value || '';
+    const company = isRetail ? retailSelectedCompany : invoiceSelectedCompany;
+    const product = name.trim() ? findProductByNameAndCompany(name.trim(), company) : null;
+    const pipe = isPipeProduct(product);
+    if (labelEl && labelEl.tagName === 'LABEL') labelEl.textContent = pipe ? 'كم متر؟' : 'الكمية';
+    if (!hintEl) return;
+    if (!pipe) { hintEl.textContent = ''; hintEl.classList.add('hidden'); return; }
+    const m = parseFloat(qtyEl ? qtyEl.value : 0) || 0;
+    const len = pipeLengthOf(product);
+    let txt = `السعر بالمتر — الماسورة ${len} متر`;
+    if (m > 0) {
+        const t = pipeBreakdownText(m, len);
+        txt = `${m} متر` + (m > len && t ? ` = ${t}` : '') + `  (الماسورة ${len} متر)`;
+    }
+    hintEl.textContent = txt;
+    hintEl.classList.remove('hidden');
+}
+window.updatePipeHint = updatePipeHint;
+
+// ==================== أكواد المقاسات القصيرة (٤ أرقام) ====================
+// كل مقاس بياخد كود رقمي ثابت (1001, 1002, ...) بيتحفظ مع المنتج.
+// بيرجّع true لو ضاف أكواد جديدة (عشان نحفظها).
+function ensureVariantCodes() {
+    const used = new Set();
+    let maxCode = 1000;
+    (products || []).forEach(p => (p && p.variants || []).forEach(v => {
+        const c = String(v.code || '');
+        if (/^\d{3,6}$/.test(c) && !used.has(c)) { used.add(c); maxCode = Math.max(maxCode, Number(c)); }
+        else if (v.code) { delete v.code; }          // كود مكرر أو غلط: هيتعمل له كود جديد
+    }));
+    let changed = false;
+    (products || []).forEach(p => (p && p.variants || []).forEach(v => {
+        if (!v.code) {
+            maxCode += 1;
+            v.code = String(maxCode);
+            used.add(v.code);
+            changed = true;
+        }
+    }));
+    return changed;
+}
+window.ensureVariantCodes = ensureVariantCodes;
+
+// سعر التجار للمقاس: السعر التجاري لو متحدد، وإلا بنرجع لسعر القطاعي
+function getWholesalePrice(variant) {
+    if (!variant) return 0;
+    const w = Number(variant.wholesalePrice);
+    return w > 0 ? w : (Number(variant.price) || 0);
+}
+window.getWholesalePrice = getWholesalePrice;
+
 async function saveProducts() {
     try {
         await db.collection("appData").doc("products").set({
@@ -338,6 +448,7 @@ async function loadProducts() {
         
         if (doc.exists) {
             products = doc.data().products || [];
+            if (ensureVariantCodes()) await saveProducts();   // أول مرة: نولّد الأكواد القصيرة للمقاسات القديمة
         } else {
             // بيانات افتراضية أول مرة
             products = [];
@@ -990,6 +1101,8 @@ function renderVariantsInModal() {
         return;
     }
 
+    const pipeMode = !!(document.getElementById('product-is-pipe') || {}).checked;
+    const perM = pipeMode ? ' (للمتر)' : '';
     editingVariants.forEach((variant, index) => {
         const row = document.createElement('div');
         row.className = 'bg-gray-50 rounded-2xl p-3 space-y-2';
@@ -1005,14 +1118,20 @@ function renderVariantsInModal() {
                         ? `<input type="number" step="0.01" min="0" placeholder="السعر الأصلي" value="${variant.originalPrice || ''}" oninput="updateVariantOriginalPrice(${index}, this.value)" class="w-full px-4 py-3 rounded-xl border focus:border-blue-400 text-lg text-center">`
                         : `<button type="button" onclick="unlockAndRender('variants')" class="w-full px-4 py-3 rounded-xl border border-dashed bg-slate-50 text-slate-400 text-sm font-semibold">🔒 محمي — اضغطي لإدخال كلمة السر</button>`}
                 </div>
+            </div>
+            <div class="flex gap-3 items-center">
                 <div class="flex-1">
-                    <label class="text-xs text-slate-400 mb-1 block">السعر بعد المكسب</label>
-                    <input type="number" step="0.01" min="0" placeholder="السعر بعد المكسب" value="${variant.price || ''}" oninput="updateVariantPrice(${index}, this.value)" class="w-full px-4 py-3 rounded-xl border focus:border-blue-400 text-lg text-center">
+                    <label class="text-xs text-slate-400 mb-1 block">سعر قطاعي${perM} <span class="text-red-500">*</span> <span class="text-slate-300">(إجباري)</span></label>
+                    <input type="number" step="0.01" min="0" placeholder="سعر القطاعي" value="${variant.price || ''}" oninput="updateVariantPrice(${index}, this.value)" class="w-full px-4 py-3 rounded-xl border focus:border-blue-400 text-lg text-center">
+                </div>
+                <div class="flex-1">
+                    <label class="text-xs text-slate-400 mb-1 block">سعر تجاري${perM} <span class="text-slate-300">(مش إجباري)</span></label>
+                    <input type="number" step="0.01" min="0" placeholder="سعر التجار" value="${variant.wholesalePrice || ''}" oninput="updateVariantWholesale(${index}, this.value)" class="w-full px-4 py-3 rounded-xl border focus:border-blue-400 text-lg text-center">
                 </div>
             </div>
             <div class="flex gap-3 items-center">
                 <div class="flex-1">
-                    <label class="text-xs text-slate-400 mb-1 block">الكمية المتاحة بالمخزن</label>
+                    <label class="text-xs text-slate-400 mb-1 block">${pipeMode ? 'الكمية المتاحة بالمخزن (بالمتر)' : 'الكمية المتاحة بالمخزن'}</label>
                     <input type="number" step="1" min="0" placeholder="الكمية" value="${variant.stock || ''}" oninput="updateVariantStock(${index}, this.value)" class="w-full px-4 py-2.5 rounded-xl border focus:border-blue-400 text-center">
                 </div>
                 <div class="flex-1">
@@ -1027,12 +1146,13 @@ function renderVariantsInModal() {
 
 function updateVariantSize(index, value) { if (editingVariants[index]) editingVariants[index].size = value; }
 function updateVariantPrice(index, value) { if (editingVariants[index]) editingVariants[index].price = parseFloat(value) || 0; }
+function updateVariantWholesale(index, value) { if (editingVariants[index]) editingVariants[index].wholesalePrice = parseFloat(value) || 0; }
 function updateVariantOriginalPrice(index, value) { if (editingVariants[index]) editingVariants[index].originalPrice = parseFloat(value) || 0; }
 function updateVariantStock(index, value) { if (editingVariants[index]) editingVariants[index].stock = parseFloat(value) || 0; }
 function updateVariantAlert(index, value) { if (editingVariants[index]) editingVariants[index].alertThreshold = parseFloat(value) || 0; }
 
 function addVariantRow() {
-    editingVariants.push({ size: '', originalPrice: 0, price: 0, stock: 0, alertThreshold: 0 });
+    editingVariants.push({ size: '', originalPrice: 0, price: 0, wholesalePrice: 0, stock: 0, alertThreshold: 0 });
     renderVariantsInModal();
 }
 
@@ -1041,6 +1161,22 @@ function removeVariant(index) {
     renderVariantsInModal();
 }
 
+function setPipeFieldsInModal(isPipe, len) {
+    const cb = document.getElementById('product-is-pipe');
+    const lenInput = document.getElementById('product-pipe-length');
+    const box = document.getElementById('product-pipe-length-box');
+    if (cb) cb.checked = !!isPipe;
+    if (lenInput) lenInput.value = len || 6;
+    if (box) box.classList.toggle('hidden', !isPipe);
+}
+function onPipeToggle() {
+    const cb = document.getElementById('product-is-pipe');
+    const box = document.getElementById('product-pipe-length-box');
+    if (box) box.classList.toggle('hidden', !(cb && cb.checked));
+    renderVariantsInModal();
+}
+window.onPipeToggle = onPipeToggle;
+
 function openAddProductModal() {
     editingProductId = null;
     editingProductImage = '';
@@ -1048,6 +1184,7 @@ function openAddProductModal() {
     editingCompanies = [];                    //  جديد
     document.getElementById('modal-title').textContent = 'إضافة منتج جديد';
     document.getElementById('product-name').value = '';
+    setPipeFieldsInModal(false, 6);
     renderProductImagePreview();
     
     // إعادة تعيين الشركات المختارة
@@ -1068,6 +1205,7 @@ function editProduct(id) {
     renderProductImagePreview();
     document.getElementById('modal-title').textContent = 'تعديل المنتج';
     document.getElementById('product-name').value = product.name || '';
+    setPipeFieldsInModal(!!product.isPipe, product.pipeLength || 6);
 
     editingVariants = Array.isArray(product.variants) ? JSON.parse(JSON.stringify(product.variants)) : [];
     
@@ -1100,15 +1238,24 @@ async function saveProduct() {
     if (selectedCompanies.length === 0)
         return alert(' لازم تختار شركة واحدة على الأقل للمنتج قبل الحفظ');
 
+    // أي مقاس مكتوب له اسم لازم يكون له سعر قطاعي (إجباري). السعر التجاري اختياري.
+    const missingRetail = editingVariants.find(v => (v.size || '').trim() !== '' && !(parseFloat(v.price) > 0));
+    if (missingRetail) return alert(` سعر القطاعي إجباري — اكتبي سعر القطاعي للمقاس "${missingRetail.size.trim()}"`);
+
     const cleanVariants = editingVariants
         .filter(v => (v.size || '').trim() !== '' && parseFloat(v.price) > 0)
-        .map(v => ({
-            size: v.size.trim(),
-            originalPrice: parseFloat(v.originalPrice) || 0,
-            price: parseFloat(v.price),
-            stock: parseFloat(v.stock) || 0,
-            alertThreshold: parseFloat(v.alertThreshold) || 0
-        }));
+        .map(v => {
+            const clean = {
+                size: v.size.trim(),
+                originalPrice: parseFloat(v.originalPrice) || 0,
+                price: parseFloat(v.price),                       // سعر القطاعي
+                wholesalePrice: parseFloat(v.wholesalePrice) || 0, // سعر التجار (0 = مش متحدد)
+                stock: parseFloat(v.stock) || 0,
+                alertThreshold: parseFloat(v.alertThreshold) || 0
+            };
+            if (v.code) clean.code = v.code;   // كود المقاس بيفضل ثابت
+            return clean;
+        });
 
     if (cleanVariants.length === 0) return alert(' تأكد إن كل مقاس له اسم وسعر صحيح');
 
@@ -1129,12 +1276,29 @@ async function saveProduct() {
 
     let savedProductId = editingProductId;
 
+    // لو المقاس اتغيّر اسمه، بنحافظ على نفس الكود بتاعه (بالترتيب) عشان الملصقات المطبوعة تفضل شغالة
+    if (editingProductId !== null) {
+        const existing = products.find(p => p.id === editingProductId);
+        if (existing && Array.isArray(existing.variants)) {
+            cleanVariants.forEach((cv, i) => {
+                if (cv.code) return;
+                const byName = existing.variants.find(ov => ov.size === cv.size && ov.code);
+                if (byName) cv.code = byName.code;
+            });
+        }
+    }
+
+    const isPipe = !!(document.getElementById('product-is-pipe') || {}).checked;
+    const pipeLength = parseFloat((document.getElementById('product-pipe-length') || {}).value) || 6;
+
     if (editingProductId !== null) {
         const index = products.findIndex(p => p.id === editingProductId);
         if (index !== -1) {
             products[index].name = name;
             products[index].variants = cleanVariants;
             products[index].companies = selectedCompanies;
+            products[index].isPipe = isPipe;
+            products[index].pipeLength = isPipe ? pipeLength : 0;
         }
     } else {
         savedProductId = Date.now();
@@ -1142,9 +1306,12 @@ async function saveProduct() {
             id: savedProductId, 
             name, 
             variants: cleanVariants,
-            companies: selectedCompanies
+            companies: selectedCompanies,
+            isPipe: isPipe,
+            pipeLength: isPipe ? pipeLength : 0
         });
     }
+    ensureVariantCodes();   // أكواد قصيرة (٤ أرقام) لأي مقاس جديد
 
     // الصورة اختيارية: بتتحفظ لو اترفعت، وبتتمسح لو المستخدمة شالتها
     if (savedProductId !== null && savedProductId !== undefined) {
@@ -1159,10 +1326,12 @@ async function saveProduct() {
     showToast(editingProductId !== null ? ' تم تعديل المنتج' : ' تم إضافة المنتج بنجاح', 'success');
 }
 
-function deleteProduct(id) {
-    if (!confirm('هل أنت متأكد من حذف المنتج ده؟ (هينتقل لسلة المحذوفات ولو محدش رجّعه هيتحذف نهائي بعد 30 يوم)')) return;
+async function deleteProduct(id) {
     const product = products.find(p => p.id === id);
     if (!product) return;
+    // الحذف دايمًا بيطلب كلمة السر (حتى لو الأسعار المحمية مفتوحة)
+    if (!(await confirmWithPasswordOnce('عشان تحذفي المنتج اكتبي كلمة السر:'))) return;
+    if (!confirm('هل أنت متأكد من حذف المنتج ده؟ (هينتقل لسلة المحذوفات ولو محدش رجّعه هيتحذف نهائي بعد 30 يوم)')) return;
     products = products.filter(p => p.id !== id);
     trashedProducts.push({ trashId: makeTrashId(), deletedAt: Date.now(), data: JSON.parse(JSON.stringify(product)) });
     saveProducts();           //  Firebase
@@ -1208,9 +1377,18 @@ function populateInvoiceCompanyFilter() {
 
 function handleInvoiceCompanyChange() {
     const select = document.getElementById('invoice-company-filter');
-    invoiceSelectedCompany = select ? select.value : '';
+    const newCompany = select ? select.value : '';
 
-    // تصفير حقل المنتج والمقاس عند تغيير الشركة عشان منجيبش سعر شركة تانية بالغلط
+    // لو فيه منتجات لسه في القائمة المؤقتة لشركة تانية، نتأكد قبل ما نمسحها
+    if (invoiceStaging.length > 0 && newCompany !== invoiceSelectedCompany) {
+        const ok = confirm('هتفقد المنتجات اللي لسه في القائمة المؤقتة لـ "' + getCompanyLabel(invoiceSelectedCompany) + '" لو غيّرت الشركة. عايز تكمل؟');
+        if (!ok) { if (select) select.value = invoiceSelectedCompany; return; }
+        invoiceStaging = [];
+    }
+
+    invoiceSelectedCompany = newCompany;
+    invoiceStagingAdjustmentTouched = false;
+
     const productInput = document.getElementById('product-search');
     if (productInput) productInput.value = '';
     const sizeSelect = document.getElementById('size-select');
@@ -1220,6 +1398,24 @@ function handleInvoiceCompanyChange() {
     updateInvoiceStockDisplay();
 
     populateProductDatalist(invoiceSelectedCompany);
+    toggleInvoiceAdjustmentUI();
+    renderInvoiceStaging();
+}
+
+// مربع تعديل السعر لكل منتج، أو على القائمة المؤقتة كلها (البحر الأحمر / أكوا دلتا / Dr)
+function toggleInvoiceAdjustmentUI() {
+    const perItemBlock = document.getElementById('invoice-per-item-adjust-block');
+    const levelBlock = document.getElementById('invoice-level-adjust');
+    if (!perItemBlock || !levelBlock) return;
+    if (PERCENT_COMPANIES.includes(invoiceSelectedCompany)) {
+        perItemBlock.classList.add('hidden');
+        levelBlock.classList.remove('hidden');
+        const adjustInput = document.getElementById('invoice-price-adjust');
+        if (adjustInput) adjustInput.value = 0;
+    } else {
+        perItemBlock.classList.remove('hidden');
+        levelBlock.classList.add('hidden');
+    }
 }
 
 function updatePriceDisplay() {
@@ -1239,75 +1435,528 @@ function updatePriceDisplay() {
 
     const product = findProductByNameAndCompany(productName, invoiceSelectedCompany);
     const variant = product ? product.variants.find(v => v.size === size) : null;
-    priceDisplay.textContent = variant ? variant.price : '0';
+    priceDisplay.textContent = variant ? getWholesalePrice(variant) : '0';
 }
 
 function addToInvoice() {
     const productInput = document.getElementById('product-search');
     const sizeSelect = document.getElementById('size-select');
     const qtyInput = document.getElementById('qty-input');
-
     if (!productInput || !sizeSelect || !qtyInput) return;
 
     const productName = productInput.value.trim();
     const size = sizeSelect.value;
-    const qty = parseInt(qtyInput.value) || 1;
+    let qty = parseFloat(qtyInput.value) || 1;
 
     if (!productName) return alert(' اختر المنتج');
     if (!size) return alert(' اختر المقاس');
-    if (qty < 1) return alert(' الكمية غلط');
+    if (qty <= 0) return alert(' الكمية غلط');
 
     const product = findProductByNameAndCompany(productName, invoiceSelectedCompany);
     if (!product) return alert(' المنتج غير موجود');
-
     const variant = product.variants.find(v => v.size === size);
     if (!variant) return alert(' المقاس غير موجود');
 
+    const pipe = isPipeProduct(product);
+    qty = pipe ? Math.round(qty * 100) / 100 : (Math.floor(qty) || 1);
+    const pipeInfo = pipe ? { isPipe: true, pipeLength: pipeLengthOf(product) } : {};
+    const baseWholesale = getWholesalePrice(variant);   // السعر التجاري، أو القطاعي لو مفيش سعر تجاري
+    const companyOfItem = invoiceSelectedCompany || (Array.isArray(product.companies) ? product.companies[0] : '');
+
+    const resetFields = () => {
+        qtyInput.value = 1;
+        productInput.value = '';
+        sizeSelect.innerHTML = '<option value="">اختر المقاس...</option>';
+        const pd = document.getElementById('price-display');
+        if (pd) pd.textContent = '0';
+        updateInvoiceStockDisplay();
+    };
+
+    // نفس المنتج اتباع قبل كده في نفس الفاتورة: ياخد نفس سعر الفاتورة دي
+    // (بس لو السعر الأساسي لسه زي ما كان وقت الإضافة — لو اتغيّر بياخد السعر الجديد)
+    const sameItem = currentInvoice.find(it => it.productName === product.name && String(it.size) === String(size)
+        && it.basePrice !== undefined && Math.abs(Number(it.basePrice) - baseWholesale) < 0.005);
+    if (sameItem) {
+        const rememberedPrice = Number(sameItem.price) || 0;
+        currentInvoice.push({
+            id: Date.now() + Math.floor(Math.random() * 1000),
+            productName: product.name, ...pipeInfo, size: size,
+            basePrice: baseWholesale, originalPrice: Number(variant.originalPrice) || 0,
+            price: rememberedPrice, qty: qty, subtotal: rememberedPrice * qty,
+            company: sameItem.company || companyOfItem,
+            isPercentGroup: !!sameItem.isPercentGroup, adjustType: sameItem.adjustType, adjustValue: sameItem.adjustValue,
+            addedAt: invoiceSessionAddedAt
+        });
+        renderInvoiceTable();
+        updateTotalAndRemaining();
+        resetFields();
+        showToast(`اتضاف بسعر الفاتورة دي ${rememberedPrice.toFixed(2)} ج (السعر الأساسي ${baseWholesale.toFixed(2)} ج)`, 'success');
+        return;
+    }
+
+    // الشركات الخاصة (البحر الأحمر / أكوا دلتا / Dr): قائمة مؤقتة والنسبة بتتحط بعدين
+    if (PERCENT_COMPANIES.includes(invoiceSelectedCompany)) {
+        invoiceStaging.push({
+            id: Date.now() + Math.floor(Math.random() * 1000),
+            productName: product.name, ...pipeInfo, size: size,
+            basePrice: baseWholesale, originalPrice: Number(variant.originalPrice) || 0, qty: qty
+        });
+        renderInvoiceStaging();
+        resetFields();
+        return;
+    }
+
+    // باقي الشركات: تعديل السعر (نسبة/مبلغ) على المنتج نفسه، الافتراضي صفر
+    const adjType = (document.getElementById('invoice-price-type') || {}).value || 'percent';
+    const adjVal = parseFloat((document.getElementById('invoice-price-adjust') || {}).value) || 0;
+    let finalPrice = adjType === 'percent' ? baseWholesale * (1 + adjVal / 100) : baseWholesale + adjVal;
+    finalPrice = Math.max(0, Math.round(finalPrice * 100) / 100);
+
     currentInvoice.push({
-        id: Date.now(),
-        productName: product.name,
-        size: size,
-        price: variant.price,
-        qty: qty,
-        subtotal: variant.price * qty,
-        company: invoiceSelectedCompany || (Array.isArray(product.companies) ? product.companies[0] : '')
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        productName: product.name, ...pipeInfo, size: size,
+        basePrice: baseWholesale, originalPrice: Number(variant.originalPrice) || 0,
+        price: finalPrice, qty: qty, subtotal: finalPrice * qty,
+        company: companyOfItem, addedAt: invoiceSessionAddedAt
     });
 
     renderInvoiceTable();
     updateTotalAndRemaining();
-
-    qtyInput.value = 1;
+    resetFields();
+    const adjReset = document.getElementById('invoice-price-adjust');
+    if (adjReset) adjReset.value = 0;
 }
+
+// (renderInvoiceTable الجديدة بنفس شكل القطاعي — تحت في قسم التجار)
+
+function removeFromInvoice(index) {
+    currentInvoice.splice(index, 1);
+    renderInvoiceTable();
+    updateTotalAndRemaining();
+}
+
+function renderInvoiceStaging() {
+    const container = document.getElementById('invoice-staging-container');
+    if (!container) return;
+
+    if (invoiceStaging.length === 0) {
+        container.innerHTML = `<p class="text-sm text-rose-300 mb-4">لسه معملتش إضافة منتجات — اختار منتج ومقاس وكمية واضغط "أضف" فوق، وهيتضافوا هنا الأول.</p>`;
+        return;
+    }
+
+    container.innerHTML = `
+        <label class="block text-sm font-semibold mb-3 text-rose-600">المنتجات المضافة مؤقتًا (${invoiceStaging.length})</label>
+        <div class="space-y-2 mb-5">
+            ${invoiceStaging.map(item => `
+                <div class="flex items-center justify-between bg-white rounded-xl border border-rose-100 px-3 py-2.5">
+                    <div class="min-w-0">
+                        <div class="font-semibold text-sm truncate">${item.productName}</div>
+                        <div class="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
+                            <span>${item.size} — ${Number(item.basePrice).toFixed(2)} جنيه للوحدة</span>
+                            <span class="no-print">المخزن: ${stockBadgeHtml(item, invoiceSelectedCompany)}</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <input type="number" min="1" value="${item.qty}"
+                               onchange="updateInvoiceStagingQty(${item.id}, this.value)"
+                               class="w-16 text-center border border-rose-200 rounded-lg py-1.5">
+                        <button onclick="removeInvoiceStagingItem(${item.id})" class="icon-btn-sm !text-[var(--danger)]">${icon('trash')}</button>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+window.updateInvoiceStagingQty = function(id, newQty) {
+    const qty = parseItemQty(newQty, id);
+    const item = invoiceStaging.find(i => i.id === id);
+    if (!item) return;
+    item.qty = qty < 1 ? 1 : qty;
+    renderInvoiceStaging();
+};
+
+window.removeInvoiceStagingItem = function(id) {
+    const removed = invoiceStaging.find(i => i.id === id);
+    if (!removed) return;
+    if (!confirm(`هل تريد حذف "${removed.productName}" (${removed.size}) من القائمة المؤقتة؟`)) return;
+    invoiceStaging = invoiceStaging.filter(i => i.id !== id);
+    renderInvoiceStaging();
+};
+
+function commitInvoiceStagingToInvoice() {
+    if (!PERCENT_COMPANIES.includes(invoiceSelectedCompany)) {
+        return alert(' اختر شركة من (البحر الأحمر / أكوا دلتا / Dr) الأول');
+    }
+
+    if (invoiceStaging.length === 0) {
+        return alert(' لسه معملتش إضافة منتجات للقائمة المؤقتة');
+    }
+
+    if (!invoiceStagingAdjustmentTouched) {
+        return alert(' لازم تحط نسبة الزيادة أو النقصان الأول (حتى لو صفر) قبل ما تضيف للفاتورة');
+    }
+
+    const typeSelect = document.getElementById('invoice-level-adjust-type');
+    const valueInput = document.getElementById('invoice-level-adjust-value');
+    const type = typeSelect ? typeSelect.value : 'percent';
+    const value = valueInput ? (parseFloat(valueInput.value) || 0) : 0;
+
+    if (type === 'percent') {
+        // كل منتج بياخد نفس النسبة من سعره الأصلي
+        invoiceStaging.forEach(item => {
+            const newPrice = Math.max(0, item.basePrice * (1 + value / 100));
+            currentInvoice.push({
+                id: Date.now() + Math.floor(Math.random() * 1000),
+                productName: item.productName,
+                ...(item.isPipe ? { isPipe: true, pipeLength: item.pipeLength } : {}),
+                size: item.size,
+                basePrice: item.basePrice,
+                originalPrice: Number(item.originalPrice) || 0,
+                price: newPrice,
+                qty: item.qty,
+                subtotal: newPrice * item.qty,
+                company: invoiceSelectedCompany,
+                isPercentGroup: true,
+                adjustType: type,
+                adjustValue: value,
+                addedAt: invoiceSessionAddedAt
+            });
+        });
+    } else {
+        // المبلغ الثابت: بيتوزع على كل منتجات القائمة المؤقتة، كل واحد على قد نصيبه من إجمالي القيمة الأصلية
+        const totalBase = invoiceStaging.reduce((sum, item) => sum + (item.basePrice * item.qty), 0);
+
+        invoiceStaging.forEach(item => {
+            const baseSubtotal = item.basePrice * item.qty;
+            const share = totalBase > 0 ? (baseSubtotal / totalBase) : (1 / invoiceStaging.length);
+            const addition = value * share;
+            const newSubtotal = Math.max(0, baseSubtotal + addition);
+            const newPrice = item.qty > 0 ? newSubtotal / item.qty : newSubtotal;
+
+            currentInvoice.push({
+                id: Date.now() + Math.floor(Math.random() * 1000),
+                productName: item.productName,
+                ...(item.isPipe ? { isPipe: true, pipeLength: item.pipeLength } : {}),
+                size: item.size,
+                basePrice: item.basePrice,
+                originalPrice: Number(item.originalPrice) || 0,
+                price: newPrice,
+                qty: item.qty,
+                subtotal: newSubtotal,
+                company: invoiceSelectedCompany,
+                isPercentGroup: true,
+                adjustType: type,
+                adjustValue: value,
+                addedAt: invoiceSessionAddedAt
+            });
+        });
+    }
+
+    // تصفير القائمة المؤقتة وحقل القيمة بعد الإضافة
+    invoiceStaging = [];
+    if (valueInput) valueInput.value = 0;
+    invoiceStagingAdjustmentTouched = false; // لازم يحط القيمة تاني قبل الدفعة الجاية
+
+    renderInvoiceStaging();
+    renderInvoicePercentGroups();
+    updateTotalAndRemaining();
+    showToast(' تم إضافة منتجات ' + getCompanyLabel(invoiceSelectedCompany) + ' للفاتورة', 'success');
+}
+
+window.editInvoicePercentGroup = function(companyId) {
+    const groupItems = currentInvoice.filter(item => item.company === companyId && item.isPercentGroup);
+    if (groupItems.length === 0) return;
+
+    if (!confirm('هترجع منتجات ' + getCompanyLabel(companyId) + ' للقائمة المؤقتة عشان تعدلها. متابع؟')) return;
+
+    // لو فيه منتجات تانية لسه في القائمة المؤقتة، هتتفقد
+    invoiceStaging = groupItems.map(item => ({
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        productName: item.productName,
+        ...(item.isPipe ? { isPipe: true, pipeLength: item.pipeLength } : {}),
+        size: item.size,
+        basePrice: item.basePrice,
+        originalPrice: Number(item.originalPrice) || 0,
+        qty: item.qty
+    }));
+
+    // شيل المجموعة من الفاتورة الكلية
+    currentInvoice = currentInvoice.filter(item => !(item.company === companyId && item.isPercentGroup));
+
+    // فعّل نفس الشركة واعرض القائمة المؤقتة
+    invoiceSelectedCompany = companyId;
+    const companySelect = document.getElementById('invoice-company-filter');
+    if (companySelect) companySelect.value = companyId;
+
+    const sample = groupItems[0];
+    const typeSelect = document.getElementById('invoice-level-adjust-type');
+    const valueInput = document.getElementById('invoice-level-adjust-value');
+    if (typeSelect) typeSelect.value = sample.adjustType || 'percent';
+    if (valueInput) valueInput.value = sample.adjustValue || 0;
+    invoiceStagingAdjustmentTouched = true; // القيمة رجعت من تعديل سابق، فمعتبرينها متحطوطة فعلاً
+
+    toggleInvoiceAdjustmentUI();
+    renderInvoiceStaging();
+    renderInvoiceTable();
+    renderInvoicePercentGroups();
+    updateTotalAndRemaining();
+
+    showToast(' رجعت المنتجات للتعديل — عدّل زي ما تحب وادوس "إضافة للفاتورة" تاني', 'warning');
+};
+
+window.deleteInvoicePercentGroup = function(companyId) {
+    const groupItems = currentInvoice.filter(item => item.company === companyId && item.isPercentGroup);
+    if (groupItems.length === 0) return;
+
+    if (!confirm('هل تريد حذف كل منتجات ' + getCompanyLabel(companyId) + ' من الفاتورة؟')) return;
+
+    currentInvoice = currentInvoice.filter(item => !(item.company === companyId && item.isPercentGroup));
+
+    renderInvoiceTable();
+    renderInvoicePercentGroups();
+    updateTotalAndRemaining();
+    showToast(' تم حذف منتجات ' + getCompanyLabel(companyId), 'error');
+};
 
 function renderInvoiceTable() {
     const tbody = document.getElementById('invoice-tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
 
-    currentInvoice.forEach((item, index) => {
+    const normalItems = currentInvoice.filter(item => !item.isPercentGroup);
+
+    normalItems.forEach((item) => {
         const row = document.createElement('tr');
         row.className = 'hover:bg-gray-50';
         row.innerHTML = `
             <td class="py-5 px-6 font-medium">${item.productName}</td>
             <td class="py-5 px-6 text-center no-print text-slate-400 text-sm">${getCompanyLabel(item.company)}</td>
             <td class="py-5 px-6 text-center text-lg">${item.size}</td>
-            <td class="py-5 px-6 text-center">${item.price}</td>
-            <td class="py-5 px-6 text-center text-lg font-medium">${item.qty}</td>
+            <td class="py-5 px-6 text-center no-print text-slate-400">${Number(item.basePrice ?? item.price).toFixed(2)}</td>
+            <td class="py-5 px-6 text-center">${Number(item.price).toFixed(2)}</td>
+            <td class="py-5 px-6 text-center">
+                <div class="flex items-center justify-center gap-1 no-print">
+                    <button onclick="updateInvoiceItemQty(${item.id}, ${item.qty - 1})" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">−</button>
+                    <input type="number" min="1" value="${item.qty}"
+                           onchange="updateInvoiceItemQty(${item.id}, this.value)"
+                           class="w-14 text-center border border-gray-200 rounded-lg py-1.5 text-lg font-medium">
+                    <button onclick="updateInvoiceItemQty(${item.id}, ${item.qty + 1})" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
+                </div>
+                <span class="hidden print:inline text-lg font-medium">${item.qty}</span>${item.isPipe ? `<div class="text-[11px] text-slate-400 no-print">متر${item.qty > pipeLengthOf(item) ? ' (' + pipeBreakdownText(item.qty, item.pipeLength) + ')' : ''}</div>` : ''}
+            </td>
             <td class="py-5 px-6 text-center no-print">${stockBadgeHtml(item)}</td>
-            <td class="py-5 px-6 text-center font-bold">${item.subtotal}</td>
+            <td class="py-5 px-6 text-center font-bold">${item.subtotal.toFixed(2)}</td>
             <td class="py-5 px-6 text-center no-print">
-                <button onclick="removeFromInvoice(${index})" class="icon-btn-sm !text-[var(--danger)]">${icon('trash')}</button>
+                <button onclick="removeInvoiceItemById(${item.id})" class="icon-btn-sm !text-[var(--danger)]">${icon('trash')}</button>
             </td>
         `;
         tbody.appendChild(row);
     });
-    updateTotalAndRemaining();
+
+    renderInvoicePercentGroups();
 }
 
-function removeFromInvoice(index) {
-    currentInvoice.splice(index, 1);
+window.updateInvoiceItemQty = function(id, newQty) {
+    const qty = parseItemQty(newQty, id);
+    const item = currentInvoice.find(i => i.id === id);
+    if (!item) return;
+    item.qty = qty < 1 ? 1 : qty;
+    item.subtotal = item.price * item.qty;
+
     renderInvoiceTable();
     updateTotalAndRemaining();
+};
+
+function recalcInvoiceFixedGroup(companyId) {
+    const items = currentInvoice.filter(item => item.company === companyId && item.isPercentGroup);
+    if (items.length === 0) return;
+    if (items[0].adjustType !== 'fixed') return; // نوع "نسبة مئوية %" مش محتاج إعادة حساب، كل منتج مستقل
+
+    const value = items[0].adjustValue || 0;
+    const totalBase = items.reduce((sum, it) => sum + (it.basePrice * it.qty), 0);
+
+    items.forEach(item => {
+        const baseSubtotal = item.basePrice * item.qty;
+        const share = totalBase > 0 ? (baseSubtotal / totalBase) : (1 / items.length);
+        const addition = value * share;
+        const newSubtotal = Math.max(0, baseSubtotal + addition);
+        item.price = item.qty > 0 ? newSubtotal / item.qty : newSubtotal;
+        item.subtotal = newSubtotal;
+    });
+}
+
+window.removeInvoiceItemById = function(id) {
+    const removed = currentInvoice.find(item => item.id === id);
+    if (!removed) return;
+
+    if (!confirm(`هل تريد حذف "${removed.productName}" (${removed.size}) من الفاتورة؟`)) return;
+
+    currentInvoice = currentInvoice.filter(item => item.id !== id);
+
+    if (removed.isPercentGroup) {
+        recalcInvoiceFixedGroup(removed.company);
+    }
+
+    renderInvoiceTable();
+    updateTotalAndRemaining();
+    showToast(` تم حذف "${removed.productName}" من الفاتورة`, 'error');
+};
+
+window.updateInvoicePercentItemQty = function(id, newQty) {
+    const qty = parseItemQty(newQty, id);
+    const item = currentInvoice.find(i => i.id === id);
+    if (!item) return;
+    item.qty = qty < 1 ? 1 : qty;
+
+    if (item.isPercentGroup && item.adjustType === 'fixed') {
+        recalcInvoiceFixedGroup(item.company);
+    } else {
+        item.subtotal = item.price * item.qty;
+    }
+
+    renderInvoicePercentGroups();
+    updateTotalAndRemaining();
+};
+
+function renderInvoicePercentGroups() {
+    const container = document.getElementById('invoice-percent-groups');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const groupedByCompany = {};
+    currentInvoice.filter(item => item.isPercentGroup).forEach(item => {
+        if (!groupedByCompany[item.company]) groupedByCompany[item.company] = [];
+        groupedByCompany[item.company].push(item);
+    });
+
+    const companyIds = Object.keys(groupedByCompany);
+    if (companyIds.length === 0) return;
+
+    companyIds.forEach(companyId => {
+        const items = groupedByCompany[companyId];
+        const groupTotal = items.reduce((sum, it) => sum + it.subtotal, 0);
+
+        const box = document.createElement('div');
+        box.className = 'card overflow-hidden mb-4 border-rose-100';
+        box.innerHTML = `
+            <div class="px-5 sm:px-6 py-4 bg-rose-50 border-b border-rose-100 flex flex-wrap justify-between items-center gap-2">
+                <h3 class="font-bold text-rose-700"> ${getCompanyLabel(companyId)}</h3>
+                <div class="flex items-center gap-3">
+                    <span class="text-sm text-rose-500 font-semibold">${items.length} منتج</span>
+                    <button onclick="editInvoicePercentGroup('${companyId}')" class="text-amber-600 hover:text-amber-700 text-sm font-semibold underline no-print">تعديل</button>
+                    <button onclick="deleteInvoicePercentGroup('${companyId}')" class="text-red-600 hover:text-red-700 text-sm font-semibold underline no-print">حذف الكل</button>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full table-modern">
+                    <thead class="bg-rose-50/70">
+                        <tr>
+                            <th class="text-right">المنتج</th>
+                            <th>المقاس</th>
+                            <th class="no-print">السعر الأصلي</th>
+                            <th>السعر</th>
+                            <th>الكمية</th>
+                            <th class="no-print">المتاح بالمخزن</th>
+                            <th>الإجمالي</th>
+                            <th class="no-print">حذف</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${items.map(item => `
+                            <tr class="hover:bg-gray-50">
+                                <td class="py-4 px-4 font-medium">${item.productName}</td>
+                                <td class="py-4 px-4 text-center">${item.size}</td>
+                                <td class="py-4 px-4 text-center no-print text-slate-400">${Number(item.basePrice).toFixed(2)}</td>
+                                <td class="py-4 px-4 text-center">${Number(item.price).toFixed(2)}</td>
+                                <td class="py-4 px-4 text-center">
+                                    <div class="flex items-center justify-center gap-1 no-print">
+                                        <button onclick="updateInvoicePercentItemQty(${item.id}, ${item.qty - 1})" class="w-8 h-8 rounded-lg bg-rose-100 hover:bg-rose-200 text-lg font-bold text-rose-600">−</button>
+                                        <input type="number" min="1" value="${item.qty}"
+                                               onchange="updateInvoicePercentItemQty(${item.id}, this.value)"
+                                               class="w-14 text-center border border-rose-200 rounded-lg py-1">
+                                        <button onclick="updateInvoicePercentItemQty(${item.id}, ${item.qty + 1})" class="w-8 h-8 rounded-lg bg-rose-100 hover:bg-rose-200 text-lg font-bold text-rose-600">+</button>
+                                    </div>
+                                    <span class="hidden print:inline">${item.qty}</span>${item.isPipe ? `<div class="text-[11px] text-slate-400 no-print">متر${item.qty > pipeLengthOf(item) ? ' (' + pipeBreakdownText(item.qty, item.pipeLength) + ')' : ''}</div>` : ''}
+                                </td>
+                                <td class="py-4 px-4 text-center no-print">${stockBadgeHtml(item)}</td>
+                                <td class="py-4 px-4 text-center font-bold">${item.subtotal.toFixed(2)}</td>
+                                <td class="py-4 px-4 text-center no-print">
+                                    <button onclick="removeInvoiceItemById(${item.id})" class="icon-btn-sm !text-[var(--danger)]">${icon('trash')}</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <div class="px-5 sm:px-6 py-3 bg-rose-50 border-t border-rose-100 flex justify-between font-bold text-rose-700">
+                <span>إجمالي ${getCompanyLabel(companyId)}</span>
+                <span>${groupTotal.toFixed(2)} جنيه</span>
+            </div>
+        `;
+        container.appendChild(box);
+    });
+}
+
+window.editInvoiceItemTotal = function(invIndex, itemId) {
+    const inv = savedInvoices[invIndex];
+    if (!inv || !Array.isArray(inv.items)) return;
+
+    const item = inv.items.find(it => String(it.id) === String(itemId));
+    if (!item) return;
+
+    const oldPrice = Number(item.price) || 0;
+    const qty = Number(item.qty) || 1;
+
+    const wantsToEdit = confirm(`سعر القطعة الواحدة من "${item.productName}" حاليًا ${oldPrice.toFixed(2)} جنيه.\nهل تريد تغيير السعر؟`);
+    if (!wantsToEdit) return;
+
+    const input = prompt(`اكتب السعر الجديد للقطعة الواحدة من "${item.productName}" (جنيه):`, oldPrice.toFixed(2));
+    if (input === null) return; // المستخدم ضغط إلغاء
+
+    const newPrice = Number(input);
+    if (isNaN(newPrice) || newPrice <= 0) {
+        showToast(' من فضلك أدخل رقم صحيح أكبر من صفر', 'error');
+        return;
+    }
+
+    // بيتحدث سعر القطعة الواحدة، والإجمالي بيتحسب تلقائيًا (سعر × كمية)
+    item.price = Number(newPrice.toFixed(2));
+    item.subtotal = Number((item.price * qty).toFixed(2));
+
+    // بنسجل كان بكام وبقى بكام عشان يظهر في الشاشة بس (مش في الطباعة)
+    item.priceEdited = true;
+    item.priceEditedFrom = oldPrice;
+
+    // إجمالي الفاتورة بيتحدث تلقائيًا كمجموع كل المنتجات
+    inv.total = Number(inv.items.reduce((sum, it) => sum + (Number(it.subtotal) || 0), 0).toFixed(2));
+
+    recalculateAllInvoicesForCustomer(inv.customer);
+    saveAllInvoices();
+    renderSavedInvoices();
+
+    showToast(` سعر "${item.productName}" كان ${oldPrice.toFixed(2)} جنيه وبقى ${item.price.toFixed(2)} جنيه`, 'success');
+};
+
+function invoiceItemsRowsHtml(items, invIndex) {
+    return items.map(item => `
+        <tr class="border-b">
+            <td class="py-2 px-4 text-right">${item.productName}</td>
+            <td class="py-2 px-4 text-center no-print text-slate-400 text-sm">${getCompanyLabel(item.company)}</td>
+            <td class="py-2 px-4 text-center">${item.size}</td>
+            <td class="py-2 px-4 text-center">
+                <div class="flex flex-col items-center justify-center gap-1">
+                    <div class="flex items-center justify-center gap-2">
+                        <span>${Number(item.price).toFixed(2)}</span>
+                        <button onclick="editInvoiceItemTotal(${invIndex}, '${item.id}')" class="text-purple-600 text-xs underline font-normal"> تحكم</button>
+                    </div>
+                    ${item.priceEdited ? `<div class="text-[11px] text-amber-600">كان ${Number(item.priceEditedFrom).toFixed(2)} وبقى ${Number(item.price).toFixed(2)}</div>` : ''}
+                </div>
+            </td>
+            <td class="py-2 px-4 text-center">${qtyLabel(item)}</td>
+            <td class="py-2 px-4 text-center font-bold">${Number(item.subtotal).toFixed(2)}</td>
+        </tr>
+    `).join('');
 }
 
 // ==================== حساب الرصيد السابق لعميل ====================
@@ -1324,7 +1973,8 @@ function getCustomerPreviousDebt(customerName, excludeIndex = -1) {
     for (let inv of customerInvs) {
         const total = getNetTotal(inv);   // الصافي بعد المرتجعات
         const paid = Number(inv.paid) || 0;
-        runningDebt = Math.max(0, (total + runningDebt) - paid);   // مهم: Math.max(0, ...)
+        // فاتورة "خالصة" يدويًا: مبنحسبش متبقيها كدين (زي القطاعي)
+        runningDebt = inv.settled ? 0 : Math.max(0, (total + runningDebt) - paid);
     }
 
     return runningDebt;
@@ -1374,17 +2024,29 @@ function saveCurrentInvoice() {
     const { currentTotal, discount } = updateTotalAndRemaining();
 
     const oldInvoice = editingInvoiceIndex !== null ? savedInvoices[editingInvoiceIndex] : null;
+    const initialPaidValue = parseFloat(document.getElementById("paid-input").value) || 0;
+
+    // سجل الدفعات: فاتورة جديدة = أول دفعة بتاريخ النهارده. فاتورة بتتعدل = السجل القديم زي ما هو
+    // (أي دفعة جديدة من زرار "دفع المتبقي" بتاريخها).
+    let payments;
+    if (oldInvoice) {
+        payments = Array.isArray(oldInvoice.payments) ? JSON.parse(JSON.stringify(oldInvoice.payments)) : [];
+        if (payments.length === 0 && Number(oldInvoice.paid) > 0) payments = [{ id: Date.now() + '-' + Math.floor(Math.random() * 100000), amount: Number(oldInvoice.paid), date: oldInvoice.date }];
+    } else {
+        payments = initialPaidValue > 0 ? [{ id: Date.now() + '-' + Math.floor(Math.random() * 100000), amount: initialPaidValue, date: Date.now() }] : [];
+    }
+    const totalPaid = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
     const invoice = {
-        customer,
+        customer: customer || 'عميل غير محدد',
         items: JSON.parse(JSON.stringify(currentInvoice)),
         total: Number(currentTotal.toFixed(2)),
         discount: Number(discount.toFixed(2)),
-        paid: parseFloat(document.getElementById("paid-input").value) || 0,
-        date: (editingInvoiceIndex !== null && savedInvoices[editingInvoiceIndex])
-        ? savedInvoices[editingInvoiceIndex].date
-        : Date.now()
+        paid: Number(totalPaid.toFixed(2)),
+        payments: payments,
+        date: oldInvoice ? oldInvoice.date : Date.now()
     };
+    if (oldInvoice && oldInvoice.settled) invoice.settled = true;
 
     // سجل المرتجعات بتاع الفاتورة بيفضل زي ما هو حتى لو الفاتورة اتعدلت
     if (editingInvoiceIndex !== null && savedInvoices[editingInvoiceIndex] && Array.isArray(savedInvoices[editingInvoiceIndex].returns)) {
@@ -1415,8 +2077,14 @@ function saveCurrentInvoice() {
 
     // تصفير
     currentInvoice = [];
+    invoiceStaging = [];
     editingInvoiceIndex = null;
+    invoiceSessionAddedAt = Date.now();
+    unlockInvoicePaidInput();
+    const cancelBtnAfterSave = document.getElementById('cancel-edit-invoice-btn');
+    if (cancelBtnAfterSave) cancelBtnAfterSave.classList.add('hidden');
     renderInvoiceTable();
+    renderInvoiceStaging();
     updateTotalAndRemaining();
 
     if (customerInput) customerInput.value = '';
@@ -1515,7 +2183,7 @@ function recalculateAllInvoicesForCustomer(customerName) {
         const paid = Number(inv.paid) || 0;
 
         const grandTotal = currentTotal + runningDebt;
-        const remaining = grandTotal - paid;
+        const remaining = inv.settled ? 0 : (grandTotal - paid);
 
         // حفظ القيم المحسوبة (اختياري للعرض السريع)
         savedInvoices[realIndex].grandTotal = Number(grandTotal.toFixed(2));
@@ -1531,6 +2199,18 @@ function updateRemaining() { updateTotalAndRemaining(); }
 function updateInvoiceHeader() {
     const customerNameInput = document.getElementById('customer-name');
     const invoiceCustomer = document.getElementById('invoice-customer');
+    const balanceEl = document.getElementById('invoice-customer-balance');
+    if (customerNameInput && balanceEl) {
+        const nm = customerNameInput.value.trim() || 'عميل غير محدد';
+        const prev = getCustomerPreviousDebt(nm, editingInvoiceIndex);
+        if (prev > 0) {
+            balanceEl.innerHTML = `<span class="text-red-600">عليه ${prev.toFixed(2)} جنيه سابقًا</span>`;
+            balanceEl.className = "px-5 py-3 rounded-xl text-sm font-medium bg-red-50 text-red-600 flex items-center justify-center min-w-[180px]";
+        } else {
+            balanceEl.innerHTML = `<span class="text-gray-500">لا يوجد رصيد سابق</span>`;
+            balanceEl.className = "px-5 py-3 rounded-xl text-sm font-medium bg-gray-50 text-gray-500 flex items-center justify-center min-w-[180px]";
+        }
+    }
     if (!invoiceCustomer || !customerNameInput) return;
 
     const name = customerNameInput.value.trim() || 'عميل غير محدد';
@@ -1550,12 +2230,28 @@ function updateInvoiceHeader() {
 function clearInvoice() {
     if (!confirm('هل تريد مسح الفاتورة كاملة؟')) return;
     currentInvoice = [];
+    invoiceStaging = [];
+    editingInvoiceIndex = null;
+    invoiceSessionAddedAt = Date.now();
+    unlockInvoicePaidInput();
     renderInvoiceTable();
+    renderInvoiceStaging();
     updateTotalAndRemaining();
 
     const customerName = document.getElementById('customer-name');
     if (customerName) customerName.value = '';
+    const cancelBtn = document.getElementById('cancel-edit-invoice-btn');
+    if (cancelBtn) cancelBtn.classList.add('hidden');
     updateInvoiceHeader();
+}
+
+function unlockInvoicePaidInput() {
+    const paidInput = document.getElementById('paid-input');
+    if (paidInput) {
+        paidInput.readOnly = false;
+        paidInput.classList.remove('opacity-60', 'cursor-not-allowed');
+        paidInput.title = '';
+    }
 }
 
 
@@ -1573,12 +2269,34 @@ function buildInvoiceCardHTML(inv, index) {
     const previousDebt = getCustomerPreviousDebt(inv.customer, index);
     const grandTotal = currentTotal + previousDebt;
     const paid = Number(inv.paid) || 0;
-    const remaining = grandTotal - paid;
+    const actualRemaining = Math.max(0, grandTotal - paid);
+    const remaining = inv.settled ? 0 : actualRemaining;
+    const paymentsHistory = computeRetailPaymentsHistory(inv, grandTotal);
+
+    const itemGroups = groupRetailItemsByAddedAt(inv.items, inv.date);
+    ensureRetailItemIds(inv);
+    const itemsHtml = itemGroups.length > 1
+        ? itemGroups.map(group => `
+            <tr class="bg-amber-50">
+                <td colspan="6" class="py-2 px-4 text-right text-xs font-semibold text-amber-700">
+                     أُضيف بتاريخ: ${formatRetailDateTime(group.date)}
+                </td>
+            </tr>
+            ${invoiceItemsRowsHtml(group.items, index)}
+        `).join('')
+        : invoiceItemsRowsHtml(inv.items, index);
+    const invoiceProfit = computeRetailInvoiceProfitAdjusted(inv);
 
     return `
             <div class="flex justify-between items-center mb-3">
                 <div class="font-semibold">${inv.customer}</div>
                 <div class="text-gray-500 text-sm">${formattedDate} - ${formattedTime}</div>
+            </div>
+            <div class="no-print text-xs font-semibold text-amber-600 mb-2 flex items-center gap-2">
+                <span> مكسب هذه الفاتورة:</span>
+                <span class="hidden-price-mask select-none">••••</span>
+                <span class="hidden-price-value hidden">${invoiceProfit.toFixed(2)} جنيه</span>
+                <button type="button" onclick="toggleOriginalPriceCell(this)" title="إظهار/إخفاء المكسب" class="icon-btn-sm">${icon('eye')}</button>
             </div>
 
             ${stockStatusBlockHtml(inv, 'invoice', index)}
@@ -1603,50 +2321,70 @@ function buildInvoiceCardHTML(inv, index) {
                         </tr>
                     </thead>
                     <tbody>
-                        ${(inv.items || []).map(item => `
-                            <tr class="border-b">
-                                <td class="py-2 px-4 text-right">${item.productName}</td>
-                                <td class="py-2 px-4 text-center no-print text-slate-400 text-sm">${getCompanyLabel(item.company)}</td>
-                                <td class="py-2 px-4 text-center">${item.size}</td>
-                                <td class="py-2 px-4 text-center">${item.price}</td>
-                                <td class="py-2 px-4 text-center">${item.qty}</td>
-                                <td class="py-2 px-4 text-center font-bold">${item.subtotal}</td>
-                            </tr>
-                        `).join('')}
+                        ${itemsHtml}
                     </tbody>
                 </table>
 
                 <!-- سجل المرتجعات (بيظهر لوحده تحت الفاتورة وبس لما يكون فيه إرجاع) -->
                 ${returnsSectionHtml('invoice', index, inv)}
 
-                <!-- المبالغ -->
+                <!-- المبالغ (نفس شكل القطاعي) -->
                 <div class="bg-white rounded-2xl p-5 shadow-sm">
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
-                        <div>
-                            <div class="text-xs text-gray-500 mb-1">${getReturnsTotal(inv) > 0 ? 'صافي الفاتورة بعد المرتجعات' : 'إجمالي الفاتورة الجديدة'}</div>
-                            <div class="text-2xl font-bold text-blue-600">
-                                ${currentTotal.toFixed(2)} جنيه
-                            </div>
-                            ${Number(inv.discount) > 0 ? `<div class="text-xs text-amber-600 mt-1">(بعد خصم ${Number(inv.discount).toFixed(2)} جنيه)</div>` : ''}
+                    <div class="text-center">
+                        <div class="text-xs text-gray-500 mb-1">${getReturnsTotal(inv) > 0 ? 'إجمالي الفاتورة (بعد خصم المرتجعات)' : 'إجمالي الفاتورة'}</div>
+                        <div class="text-2xl font-bold text-blue-600">${grandTotal.toFixed(2)} جنيه</div>
+                        ${Number(inv.discount) > 0 ? `<div class="text-xs text-amber-600 mt-1">(بعد خصم ${Number(inv.discount).toFixed(2)} جنيه)</div>` : ''}
+                    </div>
+                    ${paymentsHistory.length > 0 ? `
+                        <div class="space-y-2 mt-4 pt-4 border-t">
+                            ${paymentsHistory.map(p => `
+                                <div class="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2 text-sm gap-2 flex-wrap">
+                                    <div class="text-slate-400 text-xs">${formatRetailDateTime(p.date)}</div>
+                                    <div class="text-green-600 font-semibold">دفع ${p.amount.toFixed(2)} جنيه</div>
+                                    <div class="${p.remainingAfter > 0 ? 'text-red-600' : 'text-green-600'} font-bold">متبقي ${p.remainingAfter.toFixed(2)} جنيه</div>
+                                    <div class="flex items-center gap-3">
+                                        <button onclick="startEditInvoicePayment(${index}, '${p.id}')" class="inv-act inv-act-sm inv-act-amber">✎ تعديل</button>
+                                        <button onclick="deleteInvoicePayment(${index}, '${p.id}')" class="inv-act inv-act-sm inv-act-red">🗑 حذف</button>
+                                    </div>
+                                </div>
+                            `).join('')}
                         </div>
+                    ` : ''}
+                    <div class="mt-4 pt-4 border-t text-center">
+                        <div class="text-xs text-gray-500 mb-1">المتبقي النهائي</div>
+                        <div class="text-3xl font-bold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}">${remaining.toFixed(2)} جنيه</div>
+                        ${inv.settled && actualRemaining > 0 ? `<div class="text-xs text-amber-600 mt-1">(اتحطت خالصة يدويًا — المتبقي الفعلي كان ${actualRemaining.toFixed(2)} جنيه)</div>` : ''}
+                    </div>
+                </div>
 
-                        <div>
-                            <div class="text-xs text-gray-500 mb-1">المبلغ المدفوع</div>
-                            <div class="text-2xl font-bold text-green-600">
-                                ${paid.toFixed(2)} جنيه
-                            </div>
-                        </div>
-                        <div class="md:col-span-3 mt-4 pt-4 border-t">
-                            <div class="text-xs text-gray-500 mb-1">المتبقي النهائي</div>
-                            <div class="text-3xl font-bold ${remaining > 0 ? 'text-red-600' : 'text-green-600'}">
-                                ${remaining.toFixed(2)} جنيه
-                            </div>
-                        </div>
+                <div id="invoice-edit-payment-form-${index}" class="hidden mt-4 bg-blue-50 border border-blue-200 rounded-xl p-4">
+                    <label class="block text-sm font-semibold text-blue-700 mb-2">تعديل مبلغ الدفعة</label>
+                    <div class="flex gap-2 flex-wrap">
+                        <input id="invoice-edit-payment-amount-${index}" type="number" min="0" step="0.01" class="input-base flex-1 min-w-[140px]">
+                        <button onclick="saveEditedInvoicePayment(${index})" class="btn-success !px-5">حفظ</button>
+                        <button onclick="cancelEditInvoicePayment(${index})" class="btn-secondary !px-5">إلغاء</button>
+                    </div>
+                </div>
+
+                <div id="invoice-pay-form-${index}" class="hidden mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4">
+                    <label class="block text-sm font-semibold text-amber-700 mb-2">إضافة دفعة جديدة (المتبقي حاليًا ${remaining.toFixed(2)} جنيه)</label>
+                    <div class="flex gap-2 flex-wrap">
+                        <input id="invoice-pay-amount-${index}" type="number" min="0" step="0.01" placeholder="المبلغ..." class="input-base flex-1 min-w-[140px]">
+                        <button onclick="submitInvoicePayment(${index})" class="btn-success !px-5">حفظ</button>
+                        <button onclick="cancelInvoicePayForm(${index})" class="btn-secondary !px-5">إلغاء</button>
                     </div>
                 </div>
 
                 <!-- أزرار -->
-                <div class="inv-actions no-print">
+                <div class="inv-actions center no-print">
+                    ${inv.settled
+                        ? `<span class="inv-badge-done">✓ خالصة (يدوي)</span>
+                           <button onclick="toggleInvoiceSettled(${index})" class="inv-act inv-act-sm">↺ إلغاء الخالصة</button>`
+                        : (remaining > 0
+                            ? `<button onclick="toggleInvoicePayForm(${index})" class="inv-act inv-act-green">💵 دفع المتبقي</button>
+                               <button onclick="toggleInvoiceSettled(${index})" class="inv-act inv-act-green">✓ اعتبارها خالصة</button>`
+                            : `<span class="inv-badge-done">✓ تم السداد بالكامل</span>`)
+                    }
                     ${stockUndoButtonHtml(inv, 'invoice', index)}
                     <button onclick="openReturnsModal('invoice', ${index})" class="inv-act inv-act-purple">↩ مرتجع</button>
                     <button onclick="printSavedInvoice(${index})" class="inv-act inv-act-blue">🖨 طباعة</button>
@@ -1657,6 +2395,134 @@ function buildInvoiceCardHTML(inv, index) {
             </div>
     `;
 }
+
+// ==================== دفعات وخالصة فواتير التجار (نفس منطق القطاعي) ====================
+let invoiceEditingPaymentContext = null;
+
+window.toggleInvoiceSettled = function(index) {
+    const inv = savedInvoices[index];
+    if (!inv) return;
+    if (inv.settled) {
+        if (!confirm('هل تريد إلغاء اعتبار هذه الفاتورة "خالصة"؟ هيرجع المتبقي الفعلي يظهر تاني.')) return;
+        inv.settled = false;
+    } else {
+        if (!confirm('هل تريد اعتبار هذه الفاتورة "خالصة" رغم إن المدفوع أقل من الإجمالي؟ مش هتظهر كدين على التاجر تاني.')) return;
+        inv.settled = true;
+    }
+    recalculateAllInvoicesForCustomer(inv.customer);
+    saveAllInvoices();
+    renderSavedInvoices();
+    showToast(inv.settled ? ' تم اعتبار الفاتورة خالصة' : ' تم إلغاء الخالصة', inv.settled ? 'success' : 'warning');
+};
+
+window.toggleInvoicePayForm = function(index) {
+    const editForm = document.getElementById(`invoice-edit-payment-form-${index}`);
+    if (editForm) editForm.classList.add('hidden');
+    invoiceEditingPaymentContext = null;
+    const form = document.getElementById(`invoice-pay-form-${index}`);
+    if (form) form.classList.toggle('hidden');
+};
+
+window.cancelInvoicePayForm = function(index) {
+    const input = document.getElementById(`invoice-pay-amount-${index}`);
+    if (input) input.value = '';
+    const form = document.getElementById(`invoice-pay-form-${index}`);
+    if (form) form.classList.add('hidden');
+};
+
+window.submitInvoicePayment = function(index) {
+    const input = document.getElementById(`invoice-pay-amount-${index}`);
+    if (!input) return;
+    const amount = parseFloat(input.value) || 0;
+    if (amount <= 0) return alert(' اكتب مبلغ صحيح أكبر من صفر');
+
+    const inv = savedInvoices[index];
+    if (!inv) return;
+    ensureRetailPayments(inv);
+
+    const grandTotal = getNetTotal(inv) + getCustomerPreviousDebt(inv.customer, index);
+    const paidSoFar = inv.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    const remainingNow = Math.max(0, grandTotal - paidSoFar);
+    if (amount > remainingNow + 0.009) {
+        return alert(` المبلغ أكبر من المتبقي (المتبقي حاليًا ${remainingNow.toFixed(2)} جنيه)`);
+    }
+
+    inv.payments.push({ id: Date.now() + '-' + Math.floor(Math.random() * 100000), amount: amount, date: Date.now() });
+    inv.paid = Number((paidSoFar + amount).toFixed(2));
+
+    recalculateAllInvoicesForCustomer(inv.customer);
+    saveAllInvoices();
+    renderSavedInvoices();
+    showToast(' تم تسجيل الدفعة بنجاح', 'success');
+};
+
+window.startEditInvoicePayment = async function(index, paymentId) {
+    const inv = savedInvoices[index];
+    if (!inv) return;
+    ensureRetailPayments(inv);
+    const payment = inv.payments.find(p => String(p.id) === String(paymentId));
+    if (!payment) return;
+    if (!(await requireEditAccess(payment.date, 'تعديل الدفعة محمي — اكتبي كلمة السر:'))) return;
+
+    invoiceEditingPaymentContext = { index, paymentId: String(paymentId) };
+    const addForm = document.getElementById(`invoice-pay-form-${index}`);
+    if (addForm) addForm.classList.add('hidden');
+    const editForm = document.getElementById(`invoice-edit-payment-form-${index}`);
+    const editInput = document.getElementById(`invoice-edit-payment-amount-${index}`);
+    if (editInput) editInput.value = Number(payment.amount).toFixed(2);
+    if (editForm) editForm.classList.remove('hidden');
+};
+
+window.cancelEditInvoicePayment = function(index) {
+    invoiceEditingPaymentContext = null;
+    const editForm = document.getElementById(`invoice-edit-payment-form-${index}`);
+    if (editForm) editForm.classList.add('hidden');
+};
+
+window.saveEditedInvoicePayment = function(index) {
+    if (!invoiceEditingPaymentContext || invoiceEditingPaymentContext.index !== index) return;
+    const inv = savedInvoices[index];
+    if (!inv) return;
+    ensureRetailPayments(inv);
+    const payment = inv.payments.find(p => String(p.id) === String(invoiceEditingPaymentContext.paymentId));
+    if (!payment) return;
+
+    const input = document.getElementById(`invoice-edit-payment-amount-${index}`);
+    const newAmount = parseFloat(input ? input.value : 0) || 0;
+    if (newAmount <= 0) return alert(' اكتب مبلغ صحيح أكبر من صفر');
+
+    const grandTotal = getNetTotal(inv) + getCustomerPreviousDebt(inv.customer, index);
+    const otherSum = inv.payments.filter(p => String(p.id) !== String(payment.id))
+        .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    if (otherSum + newAmount > grandTotal + 0.009) {
+        return alert(` مجموع الدفعات هيتخطى إجمالي الفاتورة (الإجمالي ${grandTotal.toFixed(2)} جنيه)`);
+    }
+
+    payment.amount = newAmount;
+    inv.paid = Number((otherSum + newAmount).toFixed(2));
+    recalculateAllInvoicesForCustomer(inv.customer);
+    saveAllInvoices();
+    invoiceEditingPaymentContext = null;
+    renderSavedInvoices();
+    showToast(' تم تعديل الدفعة بنجاح', 'success');
+};
+
+window.deleteInvoicePayment = async function(index, paymentId) {
+    const inv = savedInvoices[index];
+    if (!inv) return;
+    ensureRetailPayments(inv);
+    const payToDelete = inv.payments.find(p => String(p.id) === String(paymentId));
+    if (!payToDelete) return;
+    if (!(await requireEditAccess(payToDelete.date, 'حذف الدفعة محمي — اكتبي كلمة السر:'))) return;
+    if (!confirm('هل تريد حذف هذه الدفعة؟')) return;
+    inv.payments = inv.payments.filter(p => String(p.id) !== String(paymentId));
+    inv.paid = Number(inv.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0).toFixed(2));
+    invoiceEditingPaymentContext = null;
+    recalculateAllInvoicesForCustomer(inv.customer);
+    saveAllInvoices();
+    renderSavedInvoices();
+    showToast(' تم حذف الدفعة', 'error');
+};
 
 function renderSavedInvoices() {
     const container = document.getElementById('saved-invoices-list');
@@ -1723,7 +2589,8 @@ function filterInvoicesByCustomer() {
     });
 }
 
-function deleteSavedInvoice(index) {
+async function deleteSavedInvoice(index) {
+    if (savedInvoices[index] && !(await requireEditAccess(savedInvoices[index].date, 'حذف الفاتورة محمي — اكتبي كلمة السر:'))) return;
     if (!confirm('هل أنت متأكد من حذف هذه الفاتورة؟ (هتتنقل لسلة المحذوفات ولو محدش رجّعها هتتحذف نهائي بعد 30 يوم)')) return;
     const invoice = savedInvoices[index];
     if (!invoice) return;
@@ -1738,37 +2605,67 @@ function deleteSavedInvoice(index) {
     showToast(' تم نقل الفاتورة لسلة المحذوفات', 'error');
 }
 
-function editSavedInvoice(index) {
+async function editSavedInvoice(index) {
     const invoice = savedInvoices[index];
     if (!invoice) return;
+    if (!(await requireEditAccess(invoice.date, 'تعديل الفاتورة محمي — اكتبي كلمة السر:'))) return;
 
     if (!confirm('هل تريد تعديل هذه الفاتورة؟\nسيتم استبدال البيانات القديمة بالجديدة.')) return;
 
     editingInvoiceIndex = index;
-
-    // تحميل المنتجات
     currentInvoice = JSON.parse(JSON.stringify(invoice.items));
+    invoiceStaging = [];
+    invoiceSessionAddedAt = Date.now();   // أي منتجات تتضاف أثناء التعديل بتاخد نفس التاريخ ده
 
-    // تحميل اسم الزبون
     const customerInput = document.getElementById('customer-name');
     if (customerInput) customerInput.value = invoice.customer;
 
-    // تحميل المبلغ المدفوع القديم (مهم جدًا)
     const paidInput = document.getElementById('paid-input');
     if (paidInput) {
         paidInput.value = Number(invoice.paid || 0).toFixed(2);
+        // المدفوع بيتحدث من زرار "دفع المتبقي" بس عشان منضربش سجل الدفعات القديم
+        paidInput.readOnly = true;
+        paidInput.classList.add('opacity-60', 'cursor-not-allowed');
+        paidInput.title = 'لإضافة دفعة جديدة استخدم زرار "دفع المتبقي" في قائمة الفواتير السابقة';
     }
 
     setDiscountFieldsFromSaved('invoice', invoice.discount);
 
     renderInvoiceTable();
+    renderInvoiceStaging();
     updateTotalAndRemaining();
     updateInvoiceHeader();
 
-    showSection('invoice');
+    const cancelBtn = document.getElementById('cancel-edit-invoice-btn');
+    if (cancelBtn) cancelBtn.classList.remove('hidden');
 
-    showToast(' جاري تعديل الفاتورة...', 'warning');
+    showSection('invoice');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    showToast(' جاري تعديل الفاتورة... (لإضافة دفعة استخدم زرار دفع المتبقي)', 'warning');
 }
+
+window.cancelEditInvoice = function() {
+    if (!confirm('هل تريد إلغاء التعديل؟ أي تغييرات عملتها في الفاتورة دي هتتلغي.')) return;
+    editingInvoiceIndex = null;
+    currentInvoice = [];
+    invoiceStaging = [];
+    invoiceSessionAddedAt = Date.now();
+    unlockInvoicePaidInput();
+    const customerInput = document.getElementById('customer-name');
+    if (customerInput) customerInput.value = '';
+    const paidInput = document.getElementById('paid-input');
+    if (paidInput) paidInput.value = '0';
+    const di = document.getElementById('discount-input'); if (di) di.value = '0';
+    const dt = document.getElementById('discount-type'); if (dt) dt.value = 'amount';
+    const dh = document.getElementById('discount-hint'); if (dh) dh.textContent = '';
+    renderInvoiceTable();
+    renderInvoiceStaging();
+    updateTotalAndRemaining();
+    updateInvoiceHeader();
+    const cancelBtn = document.getElementById('cancel-edit-invoice-btn');
+    if (cancelBtn) cancelBtn.classList.add('hidden');
+    showToast(' تم إلغاء التعديل', 'error');
+};
 
 async function printSavedInvoice(index) {
     const inv = savedInvoices[index];
@@ -1786,7 +2683,7 @@ async function printSavedInvoice(index) {
     const previousDebt = getCustomerPreviousDebt(inv.customer, index);
     const grandTotal = currentTotal + previousDebt;
     const paid = Number(inv.paid) || 0;
-    const remaining = grandTotal - paid;
+    const remaining = inv.settled ? 0 : Math.max(0, grandTotal - paid);
 
     const fbQr = await ensureFacebookQr();
 
@@ -1892,20 +2789,20 @@ async function printSavedInvoice(index) {
             <table>
                 <thead>
                     <tr>
+                        <th>الكمية</th>
                         <th>المنتج</th>
                         <th>المقاس</th>
                         <th>السعر</th>
-                        <th>الكمية</th>
                         <th>الإجمالي</th>
                     </tr>
                 </thead>
                 <tbody>
                     ${inv.items.map(item => `
                         <tr>
+                            <td>${qtyLabel(item)}</td>
                             <td>${item.productName}</td>
                             <td>${item.size}</td>
                             <td>${item.price}</td>
-                            <td>${item.qty}</td>
                             <td>${item.subtotal}</td>
                         </tr>
                     `).join('')}
@@ -2050,6 +2947,7 @@ function listenToDataChanges() {
         .onSnapshot((doc) => {
             if (doc.exists) {
                 products = doc.data().products || [];
+                if (ensureVariantCodes()) saveProducts();   // لو فيه مقاس من غير كود نكمّله ونحفظه
                 applyProductsFilter();
                 populateProductDatalist();
                 populateRetailProductDatalist(retailSelectedCompany);
@@ -2133,6 +3031,8 @@ async function startApp() {
     populateInvoiceCompanyFilter();
     populateRetailProductDatalist(retailSelectedCompany);
     toggleRetailAdjustmentUI();
+    toggleInvoiceAdjustmentUI();
+    renderInvoiceStaging();
 
     setupCustomerAutocomplete();
     setupRetailCustomerAutocomplete();
@@ -2263,7 +3163,8 @@ function toLocalDateKey(ts) {
 // ملحوظة: منتجات "البحر الأحمر" مستبعدة تمامًا من حساب المكسب بناءً على طلب المستخدم
 function buildRetailProfitByDay() {
     const map = {}; // { 'YYYY-MM-DD': profitAmount }
-    savedRetailInvoices.forEach(inv => {
+    // المكسب بيتحسب بنفس الطريقة بالظبط لفواتير القطاعي وفواتير التجار
+    (savedRetailInvoices || []).concat(savedInvoices || []).forEach(inv => {
         if (!Array.isArray(inv.items)) return;
         inv.items.forEach(item => {
             if (item.company === 'redsea') return; // استبعاد البحر الأحمر
@@ -2351,17 +3252,18 @@ window.renderProfitModal = function() {
 // والمقاس والشركة، وتحطه في الفاتورة عشان مكسبها يتحسب بيه بدل الطريقة القديمة.
 // لو المنتج اتحذف أو المقاس مبقاش موجود، بنسيب الفاتورة زي ما هي من غير تغيير.
 window.recalculateOldInvoicesProfit = function() {
-    if (!Array.isArray(savedRetailInvoices) || savedRetailInvoices.length === 0) {
-        return alert(' مفيش فواتير قطاعي محفوظة أصلاً');
+    const allSaved = (savedRetailInvoices || []).concat(savedInvoices || []);
+    if (allSaved.length === 0) {
+        return alert(' مفيش فواتير محفوظة أصلاً');
     }
 
-    const confirmMsg = 'هيتم تحديث "السعر الأصلي" في كل الفواتير القطاعي القديمة بالسعر الأصلي الحالي المسجل على كل منتج، وهيتغير على أساسه حساب المكسب بتاعها. متابعة؟';
+    const confirmMsg = 'هيتم تحديث "السعر الأصلي" في كل الفواتير القديمة (قطاعي وتجار) بالسعر الأصلي الحالي المسجل على كل منتج، وهيتغير على أساسه حساب المكسب بتاعها. متابعة؟';
     if (!confirm(confirmMsg)) return;
 
     let updatedItemsCount = 0;
     let updatedInvoicesCount = 0;
 
-    savedRetailInvoices.forEach(inv => {
+    allSaved.forEach(inv => {
         if (!Array.isArray(inv.items)) return;
         let invoiceChanged = false;
 
@@ -2390,7 +3292,9 @@ window.recalculateOldInvoicesProfit = function() {
     }
 
     saveAllRetailInvoices();
+    saveAllInvoices();
     renderRetailInvoices();
+    renderSavedInvoices();
     renderProfitModal();
     showToast(` تم تحديث مكسب ${updatedInvoicesCount} فاتورة (${updatedItemsCount} منتج)`, 'success');
     closeProfitModal();
@@ -2498,6 +3402,17 @@ function applyBulkPriceChange() {
 
                 // منع السعر من يبقى سالب
                 variant.price = Math.max(0, Math.round(newPrice * 100) / 100);
+
+                // نفس التعديل على السعر التجاري (لو متحدد للمقاس ده)
+                if (Number(variant.wholesalePrice) > 0) {
+                    const w = Number(variant.wholesalePrice);
+                    let newW = w;
+                    if (bulkEditType === 'percent') newW = w * (1 + value / 100);
+                    else if (bulkEditType === 'minus_percent') newW = w * (1 - value / 100);
+                    else if (bulkEditType === 'fixed') newW = w + value;
+                    else if (bulkEditType === 'minus_fixed') newW = w - value;
+                    variant.wholesalePrice = Math.max(0, Math.round(newW * 100) / 100);
+                }
             });
             updatedCount++;
         }
@@ -2667,7 +3582,7 @@ function renderRetailStaging() {
 }
 
 window.updateRetailStagingQty = function(id, newQty) {
-    const qty = parseInt(newQty) || 1;
+    const qty = parseItemQty(newQty, id);
     const item = retailStaging.find(i => i.id === id);
     if (!item) return;
     item.qty = qty < 1 ? 1 : qty;
@@ -2709,6 +3624,7 @@ function commitRetailStagingToInvoice() {
             retailInvoice.push({
                 id: Date.now() + Math.floor(Math.random() * 1000),
                 productName: item.productName,
+                ...(item.isPipe ? { isPipe: true, pipeLength: item.pipeLength } : {}),
                 size: item.size,
                 basePrice: item.basePrice,
                 originalPrice: Number(item.originalPrice) || 0,
@@ -2736,6 +3652,7 @@ function commitRetailStagingToInvoice() {
             retailInvoice.push({
                 id: Date.now() + Math.floor(Math.random() * 1000),
                 productName: item.productName,
+                ...(item.isPipe ? { isPipe: true, pipeLength: item.pipeLength } : {}),
                 size: item.size,
                 basePrice: item.basePrice,
                 originalPrice: Number(item.originalPrice) || 0,
@@ -2773,6 +3690,7 @@ window.editRetailPercentGroup = function(companyId) {
     retailStaging = groupItems.map(item => ({
         id: Date.now() + Math.floor(Math.random() * 1000),
         productName: item.productName,
+        ...(item.isPipe ? { isPipe: true, pipeLength: item.pipeLength } : {}),
         size: item.size,
         basePrice: item.basePrice,
         originalPrice: Number(item.originalPrice) || 0,
@@ -2879,7 +3797,7 @@ function renderRetailTable() {
                            class="w-14 text-center border border-gray-200 rounded-lg py-1.5 text-lg font-medium">
                     <button onclick="updateRetailItemQty(${item.id}, ${item.qty + 1})" class="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 text-lg font-bold text-gray-600">+</button>
                 </div>
-                <span class="hidden print:inline text-lg font-medium">${item.qty}</span>
+                <span class="hidden print:inline text-lg font-medium">${item.qty}</span>${item.isPipe ? `<div class="text-[11px] text-slate-400 no-print">متر${item.qty > pipeLengthOf(item) ? ' (' + pipeBreakdownText(item.qty, item.pipeLength) + ')' : ''}</div>` : ''}
             </td>
             <td class="py-5 px-6 text-center no-print">${stockBadgeHtml(item)}</td>
             <td class="py-5 px-6 text-center font-bold">${item.subtotal.toFixed(2)}</td>
@@ -2895,7 +3813,7 @@ function renderRetailTable() {
 
 // ==================== تعديل كمية منتج عادي (مش شركات نسبة) داخل الفاتورة الحالية قبل الحفظ ====================
 window.updateRetailItemQty = function(id, newQty) {
-    const qty = parseInt(newQty) || 1;
+    const qty = parseItemQty(newQty, id);
     const item = retailInvoice.find(i => i.id === id);
     if (!item) return;
     item.qty = qty < 1 ? 1 : qty;
@@ -2946,7 +3864,7 @@ window.removeRetailItemById = function(id) {
 
 // ==================== تعديل كمية منتج داخل مربع شركة (البحر الأحمر / أكوا دلتا / Dr) ====================
 window.updateRetailPercentItemQty = function(id, newQty) {
-    const qty = parseInt(newQty) || 1;
+    const qty = parseItemQty(newQty, id);
     const item = retailInvoice.find(i => i.id === id);
     if (!item) return;
     item.qty = qty < 1 ? 1 : qty;
@@ -3321,6 +4239,7 @@ function stockBadgeHtml(item, fallbackCompany) {
 }
 
 function updateInvoiceStockDisplay() {
+    updatePipeHint('invoice');
     const el = document.getElementById('stock-display');
     if (!el) return;
     const nameEl = document.getElementById('product-search');
@@ -3328,11 +4247,12 @@ function updateInvoiceStockDisplay() {
     const qtyEl = document.getElementById('qty-input');
     const name = nameEl ? nameEl.value.trim() : '';
     const size = sizeEl ? sizeEl.value : '';
-    const qty = parseInt(qtyEl ? qtyEl.value : 0) || 0;
+    const qty = parseFloat(qtyEl ? qtyEl.value : 0) || 0;
     paintStockBadge(el, getVariantStock(name, size, invoiceSelectedCompany), qty);
 }
 
 function updateRetailStockDisplay() {
+    updatePipeHint('retail');
     const el = document.getElementById('retail-stock-display');
     if (!el) return;
     const nameEl = document.getElementById('retail-product-search');
@@ -3340,7 +4260,7 @@ function updateRetailStockDisplay() {
     const qtyEl = document.getElementById('retail-qty-input');
     const name = nameEl ? nameEl.value.trim() : '';
     const size = sizeEl ? sizeEl.value : '';
-    const qty = parseInt(qtyEl ? qtyEl.value : 0) || 0;
+    const qty = parseFloat(qtyEl ? qtyEl.value : 0) || 0;
     paintStockBadge(el, getVariantStock(name, size, retailSelectedCompany), qty);
 }
 
@@ -3580,7 +4500,7 @@ function retailItemsRowsHtml(items, invIndex) {
                     ${item.priceEdited ? `<div class="text-[11px] text-amber-600">كان ${Number(item.priceEditedFrom).toFixed(2)} وبقى ${Number(item.price).toFixed(2)}</div>` : ''}
                 </div>
             </td>
-            <td class="py-2 px-4 text-center">${item.qty}</td>
+            <td class="py-2 px-4 text-center">${qtyLabel(item)}</td>
             <td class="py-2 px-4 text-center font-bold">${Number(item.subtotal).toFixed(2)}</td>
         </tr>
     `).join('');
@@ -3834,13 +4754,14 @@ window.submitRetailPayment = function(index) {
 };
 
 // ==================== تعديل / حذف دفعة مسجّلة قبل كده ====================
-window.startEditRetailPayment = function(index, paymentId) {
+window.startEditRetailPayment = async function(index, paymentId) {
     const inv = savedRetailInvoices[index];
     if (!inv) return;
     ensureRetailPayments(inv);
 
     const payment = inv.payments.find(p => String(p.id) === String(paymentId));
     if (!payment) return;
+    if (!(await requireEditAccess(payment.date, 'تعديل الدفعة محمي — اكتبي كلمة السر:'))) return;
 
     retailEditingPaymentContext = { index, paymentId: String(paymentId) };
 
@@ -3896,10 +4817,13 @@ window.saveEditedRetailPayment = function(index) {
     showToast(' تم تعديل الدفعة بنجاح', 'success');
 };
 
-window.deleteRetailPayment = function(index, paymentId) {
+window.deleteRetailPayment = async function(index, paymentId) {
     const inv = savedRetailInvoices[index];
     if (!inv) return;
     ensureRetailPayments(inv);
+    const payToDelete = inv.payments.find(p => String(p.id) === String(paymentId));
+    if (!payToDelete) return;
+    if (!(await requireEditAccess(payToDelete.date, 'حذف الدفعة محمي — اكتبي كلمة السر:'))) return;
 
     if (!confirm('هل تريد حذف هذه الدفعة؟')) return;
 
@@ -3923,9 +4847,10 @@ window.toggleRetailInvoiceDetails = function(index) {
 };
 
 // ==================== تعديل - حذف - طباعة ====================
-window.editRetailSavedInvoice = function(index) {
+window.editRetailSavedInvoice = async function(index) {
     const invoice = savedRetailInvoices[index];
     if (!invoice) return;
+    if (!(await requireEditAccess(invoice.date, 'تعديل الفاتورة محمي — اكتبي كلمة السر:'))) return;
     if (!confirm('هل تريد تعديل هذه الفاتورة القطاعية؟')) return;
 
     editingRetailInvoiceIndex = index;
@@ -4001,7 +4926,8 @@ window.cancelEditRetailInvoice = function() {
     showToast(' تم إلغاء التعديل', 'error');
 };
 
-window.deleteRetailSavedInvoice = function(index) {
+window.deleteRetailSavedInvoice = async function(index) {
+    if (savedRetailInvoices[index] && !(await requireEditAccess(savedRetailInvoices[index].date, 'حذف الفاتورة محمي — اكتبي كلمة السر:'))) return;
     if (!confirm('هل أنت متأكد من حذف هذه الفاتورة القطاعية؟ (هتتنقل لسلة المحذوفات ولو محدش رجّعها هتتحذف نهائي بعد 30 يوم)')) return;
     const inv = savedRetailInvoices[index];
     // لو الفاتورة كانت اتخصمت من المخزن، الكميات ترجع لما تتحذف (ولو لسه متخصمتش منعملش حاجة)
@@ -4040,9 +4966,10 @@ window.printRetailSavedInvoice = async function(index) {
 
     const printItemsRows = (items) => items.map(item => `
                         <tr>
+                            <td>${qtyLabel(item)}</td>
                             <td>${item.productName}</td>
                             <td>${item.size}</td>
-                            <td>${item.qty}</td>
+                            <td>${Number(item.price).toFixed(2)}</td>
                             <td>${Number(item.subtotal).toFixed(2)}</td>
                         </tr>
     `).join('');
@@ -4050,7 +4977,7 @@ window.printRetailSavedInvoice = async function(index) {
     const printItemsHtml = itemGroups.length > 1
         ? itemGroups.map(group => `
                         <tr>
-                            <td colspan="4" style="background:#FEF3C7; text-align:right; font-weight:600; color:#92400E;">
+                            <td colspan="5" style="background:#FEF3C7; text-align:right; font-weight:600; color:#92400E;">
                                  أُضيف بتاريخ: ${formatRetailDateTime(group.date)}
                             </td>
                         </tr>
@@ -4167,9 +5094,10 @@ window.printRetailSavedInvoice = async function(index) {
             <table>
                 <thead>
                     <tr>
+                        <th>الكمية</th>
                         <th>المنتج</th>
                         <th>المقاس</th>
-                        <th>الكمية</th>
+                        <th>السعر</th>
                         <th>الإجمالي</th>
                     </tr>
                 </thead>
@@ -4474,7 +5402,7 @@ function addToRetailInvoice() {
     const productName = document.getElementById('retail-product-search').value.trim();
     const size = document.getElementById('retail-size-select').value;
     const qtyInput = document.getElementById('retail-qty-input');
-    const qty = parseInt(qtyInput ? qtyInput.value : 1) || 1;
+    let qty = parseFloat(qtyInput ? qtyInput.value : 1) || 1;
 
     if (!productName) return alert(' اختر المنتج');
     if (!size) return alert(' اختر المقاس');
@@ -4482,20 +5410,24 @@ function addToRetailInvoice() {
 
     const product = findProductByNameAndCompany(productName, retailSelectedCompany);
     if (!product) return alert(' المنتج غير موجود');
+    qty = isPipeProduct(product) ? Math.round(qty * 100) / 100 : (Math.floor(qty) || 1);
 
     const variant = product.variants.find(v => v.size === size);
     if (!variant) return alert(' المقاس غير موجود');
 
     // ==== لو المنتج ده اتباع قبل كده في نفس الفاتورة، بياخد نفس السعر اللي اتباع بيه هنا ====
     // (السعر ده خاص بالفاتورة دي بس — أي فاتورة تانية هترجع للسعر الأساسي عادي)
+    // (بس لو السعر الأساسي لسه زي ما كان وقت الإضافة — لو اتغيّر في المنتج بياخد السعر الجديد)
     const sameItemInInvoice = retailInvoice.find(it =>
         it.productName === product.name && String(it.size) === String(size)
+        && it.basePrice !== undefined && Math.abs(Number(it.basePrice) - Number(variant.price)) < 0.005
     );
     if (sameItemInInvoice) {
         const rememberedPrice = Number(sameItemInInvoice.price) || 0;
         retailInvoice.push({
             id: Date.now() + Math.floor(Math.random() * 1000),
             productName: product.name,
+            ...(isPipeProduct(product) ? { isPipe: true, pipeLength: pipeLengthOf(product) } : {}),
             size: size,
             basePrice: variant.price,
             originalPrice: Number(variant.originalPrice) || 0,
@@ -4532,6 +5464,7 @@ function addToRetailInvoice() {
         retailStaging.push({
             id: Date.now() + Math.floor(Math.random() * 1000),
             productName: product.name,
+            ...(isPipeProduct(product) ? { isPipe: true, pipeLength: pipeLengthOf(product) } : {}),
             size: size,
             basePrice: variant.price,
             originalPrice: Number(variant.originalPrice) || 0,
@@ -4569,6 +5502,7 @@ function addToRetailInvoice() {
     retailInvoice.push({
         id: Date.now() + Math.floor(Math.random() * 1000),
         productName: product.name,
+        ...(isPipeProduct(product) ? { isPipe: true, pipeLength: pipeLengthOf(product) } : {}),
         size: size,
         basePrice: variant.price,
         originalPrice: Number(variant.originalPrice) || 0,
