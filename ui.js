@@ -1108,12 +1108,13 @@ const SECTION_META = {
     dashboard: { el: 'dashboard-section', title: 'لوحة المعلومات', sub: 'نظرة عامة على المبيعات والمخزون' },
     products:  { el: 'products-section',  title: 'المخزون',        sub: 'المنتجات والمقاسات والكميات' },
     invoice:   { el: 'invoice-section',   title: 'فواتير التجار',   sub: 'إنشاء ومتابعة فواتير الجملة' },
-    retail:    { el: 'retail-section',    title: 'نقطة البيع',      sub: 'فواتير القطاعي السريعة' },
+    retail:    { el: 'retail-section',    title: 'نقطة البيع',      sub: 'فواتير القطاعي والتجاري' },
     debts:     { el: 'debts-section',     title: 'المستحقات',       sub: 'أرصدة العملاء والتجار' },
     trash:     { el: 'trash-section',     title: 'المحذوفات',       sub: 'استرجاع أو حذف نهائي خلال 30 يوم' }
 };
 
 window.showSection = function (section) {
+    if (section === 'invoice') section = 'retail';   // فواتير التجار بقت جزء من نقطة البيع
     if (!SECTION_META[section]) section = 'dashboard';
 
     Object.keys(SECTION_META).forEach(key => {
@@ -1237,7 +1238,6 @@ document.addEventListener('DOMContentLoaded', function () {
 const NAV_ITEMS = [
     { group: 'عام',       id: 'btn-dashboard', nav: 'dashboard', icon: 'dashboard', label: 'لوحة المعلومات' },
     { group: 'المبيعات',  id: 'btn-retail',    nav: 'retail',    icon: 'cart',      label: 'نقطة البيع' },
-    { group: 'المبيعات',  id: 'btn-invoice',   nav: 'invoice',   icon: 'receipt',   label: 'فواتير التجار' },
     { group: 'المبيعات',  id: 'btn-debts',     nav: 'debts',     icon: 'users',     label: 'المستحقات' },
     { group: 'المخزون',   id: 'btn-products',  nav: 'products',  icon: 'box',       label: 'المنتجات' },
     { group: 'المخزون',   id: 'btn-scan-camera', action: 'openCameraScanModal()', icon: 'scan',  label: 'مسح كود بالكاميرا' },

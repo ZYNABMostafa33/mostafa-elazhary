@@ -177,7 +177,16 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(ensureFacebookQr, 2500);
 });
 
-// آخر الفاتورة: كود الصفحة + الاسم + رقم التليفون
+// علامة الفيسبوك (SVG جوه الفاتورة عشان تظهر في الطباعة من غير أي ملفات خارجية)
+function facebookIconHtml(size) {
+    size = size || 22;
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" style="vertical-align:middle;flex:none;" xmlns="http://www.w3.org/2000/svg">
+        <rect width="24" height="24" rx="5.5" fill="#1877F2"/>
+        <path fill="#fff" d="M15.12 5.32H17V2.14A26.1 26.1 0 0 0 14.26 2c-2.72 0-4.58 1.66-4.58 4.7v2.62H6.61v3.56h3.07V22h3.68v-9.12h3.06l.46-3.56h-3.52V7.05c0-1.03.28-1.73 1.76-1.73z"/>
+    </svg>`;
+}
+
+// آخر الفاتورة: كود الصفحة + علامة الفيسبوك + اسم المعرض (من غير رقم تليفون)
 function shopPrintFooterHtml(qrDataUrl, accent) {
     accent = accent || '#14B8A6';
     return `
@@ -186,9 +195,12 @@ function shopPrintFooterHtml(qrDataUrl, accent) {
             ${qrDataUrl ? `<img src="${qrDataUrl}" alt="QR"
                  style="width:78px;height:78px;border:1px solid #E2E8F0;border-radius:6px;padding:3px;background:#fff;">` : ''}
             <div style="text-align:right;font-size:13px;line-height:1.9;color:#334155;">
-                <div style="font-weight:700;color:${accent};font-size:15px;">${SHOP_FACEBOOK_NAME}</div>
-                <div>امسح الكود بالكاميرا يوديك على صفحتنا على فيسبوك</div>
-                <div style="font-weight:700;">للاستفسار: ${SHOP_PHONE}</div>
+                <div style="font-weight:700;color:${accent};font-size:15px;display:flex;align-items:center;gap:7px;">
+                    ${facebookIconHtml(24)}<span>${SHOP_FACEBOOK_NAME}</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;">
+                    ${facebookIconHtml(16)}<span>امسح الكود بالكاميرا يوديك على صفحتنا على فيسبوك</span>
+                </div>
             </div>
         </div>`;
 }
@@ -320,6 +332,7 @@ function showToast(message, type = 'success') {
 // ==================== Retail (قطاعي) - متغيرات جديدة ====================
 let retailInvoice = [];
 let savedRetailInvoices = [];
+let editingRetailKind = 'retail';          // نوع الفاتورة اللي بتتعدل في نقطة البيع: 'retail' (قطاعي) أو 'wholesale' (تجاري)
 let editingRetailInvoiceIndex = null;     //  مهم جدًا
 let retailStagingAdjustmentTouched = false; // هل المستخدم حط نسبة/مبلغ الزيادة قبل "إضافة للفاتورة" (البحر الأحمر/أكوا دلتا/Dr)
 let allRetailCustomers = [];              // للاقتراحات
@@ -334,6 +347,73 @@ let retailEditingPaymentContext = null;  // { index, paymentId } — الدفع�
 
 // ==================== المواسير (بتتباع بالمتر) ====================
 // المنتج اللي isPipe = كميته بالمتر، وسعر المقاس = سعر المتر. الماسورة عندنا طولها pipeLength (الافتراضي 6 متر).
+// ==================== المبلغ بالحروف العربي (عشان نلاحظ لو كتبنا 200 بدل 2000) ====================
+function arabicNumberToWords(n) {
+    n = Math.floor(Number(n) || 0);
+    if (n === 0) return 'صفر';
+    const ones = ['', 'واحد', 'اثنان', 'ثلاثة', 'أربعة', 'خمسة', 'ستة', 'سبعة', 'ثمانية', 'تسعة', 'عشرة',
+        'أحد عشر', 'اثنا عشر', 'ثلاثة عشر', 'أربعة عشر', 'خمسة عشر', 'ستة عشر', 'سبعة عشر', 'ثمانية عشر', 'تسعة عشر'];
+    const tens = ['', '', 'عشرون', 'ثلاثون', 'أربعون', 'خمسون', 'ستون', 'سبعون', 'ثمانون', 'تسعون'];
+    const hundreds = ['', 'مائة', 'مائتان', 'ثلاثمائة', 'أربعمائة', 'خمسمائة', 'ستمائة', 'سبعمائة', 'ثمانمائة', 'تسعمائة'];
+    const below1000 = (x) => {
+        const h = Math.floor(x / 100), r = x % 100, parts = [];
+        if (h) parts.push(hundreds[h]);
+        if (r) {
+            if (r < 20) parts.push(ones[r]);
+            else {
+                const t = Math.floor(r / 10), o = r % 10;
+                parts.push(o ? `${ones[o]} و${tens[t]}` : tens[t]);
+            }
+        }
+        return parts.join(' و');
+    };
+    const scale = (k, one, two, few, many) => {
+        if (k === 1) return one;
+        if (k === 2) return two;
+        if (k >= 3 && k <= 10) return `${below1000(k)} ${few}`;
+        return `${below1000(k)} ${many}`;
+    };
+    const parts = [];
+    const billions = Math.floor(n / 1e9), millions = Math.floor((n % 1e9) / 1e6), thousands = Math.floor((n % 1e6) / 1e3), rest = n % 1000;
+    if (billions) parts.push(scale(billions, 'مليار', 'ملياران', 'مليارات', 'مليار'));
+    if (millions) parts.push(scale(millions, 'مليون', 'مليونان', 'ملايين', 'مليون'));
+    if (thousands) parts.push(scale(thousands, 'ألف', 'ألفان', 'آلاف', 'ألف'));
+    if (rest) parts.push(below1000(rest));
+    return parts.join(' و');
+}
+function amountToArabicWords(value) {
+    const v = Math.round((Number(value) || 0) * 100) / 100;
+    if (!(v > 0)) return '';
+    const pounds = Math.floor(v + 1e-9);
+    const piasters = Math.round((v - pounds) * 100);
+    const out = [];
+    if (pounds > 0) out.push(`${arabicNumberToWords(pounds)} جنيه`);
+    if (piasters > 0) out.push(`${arabicNumberToWords(piasters)} قرشًا`);
+    return out.join(' و');
+}
+window.amountToArabicWords = amountToArabicWords;
+
+// بيكتب المبلغ بالحروف تحت الخانة (بيتعمل الصندوق تلقائيًا لو مش موجود)
+function showAmountWords(inputEl) {
+    if (!inputEl) return;
+    // خانة المبلغ المدفوع في الفاتورة ليها صندوق جاهز في الصفحة
+    let box = inputEl.id ? document.getElementById(inputEl.id.replace(/-input$/, '-words')) : null;
+    if (!box) {
+        // خانات الدفعات في كروت الفواتير: بنعمل الصندوق تحت صف الخانة
+        const host = inputEl.parentElement;
+        if (!host) return;
+        box = host.nextElementSibling;
+        if (!box || !box.classList || !box.classList.contains('amount-words')) {
+            box = document.createElement('div');
+            box.className = 'amount-words no-print text-sm font-bold text-rose-600 mt-2 min-h-[20px] w-full';
+            host.after(box);
+        }
+    }
+    const words = amountToArabicWords(inputEl.value);
+    box.textContent = words ? `${words} فقط لا غير` : '';
+}
+window.showAmountWords = showAmountWords;
+
 // ==================== حماية التعديل/الحذف: كلمة سر، إلا في أول 100 ثانية ====================
 const EDIT_GRACE_SECONDS = 100;
 // القائمة المؤقتة (لازم نسبة قبل الإضافة) للبحر الأحمر / أكوا دلتا / Dr: مقفولة — المنتج بيتضاف للفاتورة على طول
@@ -2374,7 +2454,7 @@ function buildInvoiceCardHTML(inv, index) {
                 <div id="invoice-edit-payment-form-${index}" class="hidden mt-4 bg-blue-50 border border-blue-200 rounded-xl p-4">
                     <label class="block text-sm font-semibold text-blue-700 mb-2">تعديل مبلغ الدفعة</label>
                     <div class="flex gap-2 flex-wrap">
-                        <input id="invoice-edit-payment-amount-${index}" type="number" min="0" step="0.01" class="input-base flex-1 min-w-[140px]">
+                        <input id="invoice-edit-payment-amount-${index}" oninput="showAmountWords(this)" type="number" min="0" step="0.01" class="input-base flex-1 min-w-[140px]">
                         <button onclick="saveEditedInvoicePayment(${index})" class="btn-success !px-5">حفظ</button>
                         <button onclick="cancelEditInvoicePayment(${index})" class="btn-secondary !px-5">إلغاء</button>
                     </div>
@@ -2383,7 +2463,7 @@ function buildInvoiceCardHTML(inv, index) {
                 <div id="invoice-pay-form-${index}" class="hidden mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4">
                     <label class="block text-sm font-semibold text-amber-700 mb-2">إضافة دفعة جديدة (المتبقي حاليًا ${remaining.toFixed(2)} جنيه)</label>
                     <div class="flex gap-2 flex-wrap">
-                        <input id="invoice-pay-amount-${index}" type="number" min="0" step="0.01" placeholder="المبلغ..." class="input-base flex-1 min-w-[140px]">
+                        <input id="invoice-pay-amount-${index}" oninput="showAmountWords(this)" type="number" min="0" step="0.01" placeholder="المبلغ..." class="input-base flex-1 min-w-[140px]">
                         <button onclick="submitInvoicePayment(${index})" class="btn-success !px-5">حفظ</button>
                         <button onclick="cancelInvoicePayForm(${index})" class="btn-secondary !px-5">إلغاء</button>
                     </div>
@@ -2579,9 +2659,10 @@ function filterInvoicesByCustomer() {
 
     container.innerHTML = '';
 
+    // أحدث فاتورة تظهر الأول
     const filteredInvoices = savedInvoices.filter(inv =>
         inv.customer && inv.customer.toLowerCase().includes(filter)
-    );
+    ).sort((a, b) => (Number(b.date) || 0) - (Number(a.date) || 0));
 
     if (filteredInvoices.length === 0) {
         container.innerHTML = `
@@ -2619,41 +2700,12 @@ function deleteSavedInvoice(index) {
 }
 
 function editSavedInvoice(index) {
+    // فاتورة تجاري: بتتعدل في نقطة البيع (نفس الشاشة) وبتفضل محفوظة في التجاري
     const invoice = savedInvoices[index];
     if (!invoice) return;
-
-    if (!confirm('هل تريد تعديل هذه الفاتورة؟\nسيتم استبدال البيانات القديمة بالجديدة.')) return;
-
-    editingInvoiceIndex = index;
-    currentInvoice = JSON.parse(JSON.stringify(invoice.items));
-    invoiceStaging = [];
-    invoiceSessionAddedAt = Date.now();   // أي منتجات تتضاف أثناء التعديل بتاخد نفس التاريخ ده
-
-    const customerInput = document.getElementById('customer-name');
-    if (customerInput) customerInput.value = invoice.customer;
-
-    const paidInput = document.getElementById('paid-input');
-    if (paidInput) {
-        paidInput.value = Number(invoice.paid || 0).toFixed(2);
-        // المدفوع بيتحدث من زرار "دفع المتبقي" بس عشان منضربش سجل الدفعات القديم
-        paidInput.readOnly = true;
-        paidInput.classList.add('opacity-60', 'cursor-not-allowed');
-        paidInput.title = 'لإضافة دفعة جديدة استخدم زرار "دفع المتبقي" في قائمة الفواتير السابقة';
-    }
-
-    setDiscountFieldsFromSaved('invoice', invoice.discount);
-
-    renderInvoiceTable();
-    renderInvoiceStaging();
-    updateTotalAndRemaining();
-    updateInvoiceHeader();
-
-    const cancelBtn = document.getElementById('cancel-edit-invoice-btn');
-    if (cancelBtn) cancelBtn.classList.remove('hidden');
-
-    showSection('invoice');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    showToast(' جاري تعديل الفاتورة... (لإضافة دفعة استخدم زرار دفع المتبقي)', 'warning');
+    if (editingRetailInvoiceIndex !== null && !confirm('فيه فاتورة بتتعدل دلوقتي، هتتلغي وتفتحي دي؟')) return;
+    if (!confirm('هل تريد تعديل هذه الفاتورة (تجاري)؟')) return;
+    loadInvoiceIntoPOS('wholesale', index, invoice);
 }
 
 window.cancelEditInvoice = function() {
@@ -3078,8 +3130,10 @@ function setBulkPriceKind(kind) {
     const on = ['border-amber-500', 'bg-amber-50'];
     const r = document.getElementById('btn-kind-retail');
     const w = document.getElementById('btn-kind-wholesale');
+    const o = document.getElementById('btn-kind-original');
     if (r) { r.classList.remove(...on); if (kind === 'retail') r.classList.add(...on); }
     if (w) { w.classList.remove(...on); if (kind === 'wholesale') w.classList.add(...on); }
+    if (o) { o.classList.remove(...on); if (kind === 'original') o.classList.add(...on); }
 }
 window.setBulkPriceKind = setBulkPriceKind;
 
@@ -3377,7 +3431,7 @@ function setBulkEditType(type) {
 
 function applyBulkPriceChange() {
     if (!bulkPriceKind) {
-        return alert(' اختاري الأول: هتعدلي أسعار القطاعي ولا أسعار التجاري');
+        return alert(' اختاري الأول: هتعدلي أسعار القطاعي ولا التجاري ولا السعر الأصلي');
     }
     if (!bulkEditCompany) {
         return alert(' اختر الشركة أولاً');
@@ -3400,7 +3454,7 @@ function applyBulkPriceChange() {
     else if (bulkEditType === 'fixed') actionText = `زيادة ${value} جنيه`;
     else if (bulkEditType === 'minus_fixed') actionText = `نقصان ${value} جنيه`;
 
-    const kindText = bulkPriceKind === 'wholesale' ? 'أسعار التجاري' : 'أسعار القطاعي';
+    const kindText = bulkPriceKind === 'wholesale' ? 'أسعار التجاري' : (bulkPriceKind === 'original' ? 'الأسعار الأصلية (سعر الشراء)' : 'أسعار القطاعي');
     const confirmMsg = `هل أنت متأكدة من  ${actionText} على ${kindText} فقط لمنتجات شركة ${getCompanyLabel(bulkEditCompany)}؟`;
 
     if (!confirm(confirmMsg)) {
@@ -3427,6 +3481,12 @@ function applyBulkPriceChange() {
                     // القطاعي بس — السعر التجاري ما بيتغيرش
                     variant.price = calc(Number(variant.price) || 0);
                     touched = true;
+                } else if (bulkPriceKind === 'original') {
+                    // السعر الأصلي (سعر الشراء) بس — أسعار البيع ما بتتغيرش، والفواتير القديمة محفوظ فيها سعرها
+                    if (Number(variant.originalPrice) > 0) {
+                        variant.originalPrice = calc(Number(variant.originalPrice));
+                        touched = true;
+                    }
                 } else if (Number(variant.wholesalePrice) > 0) {
                     // التجاري بس — المقاسات اللي ليها سعر تجاري متحدد، والقطاعي ما بيتغيرش
                     variant.wholesalePrice = calc(Number(variant.wholesalePrice));
@@ -3756,6 +3816,70 @@ window.deleteRetailPercentGroup = function(companyId) {
     showToast(' تم حذف منتجات ' + getCompanyLabel(companyId), 'error');
 };
 
+// ==================== بحث المنتج: اقتراحات فورية مع الكتابة ====================
+// المشكلة القديمة: القائمة كانت datalist، وكل حرف بنكتبه كان بيشيل ويرجّع الـ list فالمتصفح يقفلها
+// ولازم تدوسي على الخانة تاني. دلوقتي قائمة بتتحدّث لوحدها مع كل حرف.
+function normalizeArabicSearch(s) {
+    return String(s || '').toLowerCase()
+        .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
+        .replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه')
+        .replace(/ؤ/g, 'و').replace(/ئ/g, 'ي').trim();
+}
+function initRetailProductAutocomplete() {
+    const input = document.getElementById('retail-product-search');
+    const box = document.getElementById('retail-product-suggest');
+    if (!input || !box || input.dataset.acReady) return;
+    input.dataset.acReady = '1';
+    let active = -1, shown = [];
+
+    const hide = () => { box.classList.add('hidden'); active = -1; };
+    const pick = (name) => {
+        input.value = name;
+        hide();
+        handleRetailProductSearch(name);
+        const sizeSel = document.getElementById('retail-size-select');
+        if (sizeSel && sizeSel.options.length === 2) { sizeSel.selectedIndex = 1; updateRetailPriceDisplay(); }
+    };
+    const paint = () => {
+        box.innerHTML = shown.map((p, i) => `
+            <div data-i="${i}" class="px-4 py-2.5 cursor-pointer text-sm ${i === active ? 'bg-rose-50 text-rose-700' : 'hover:bg-slate-50'}">${p.name}</div>
+        `).join('');
+    };
+    const render = () => {
+        const q = normalizeArabicSearch(input.value);
+        const pool = products.filter(p => !retailSelectedCompany || (Array.isArray(p.companies) && p.companies.includes(retailSelectedCompany)));
+        let list;
+        if (!q) list = pool.slice();
+        else {
+            const starts = pool.filter(p => normalizeArabicSearch(p.name).startsWith(q));
+            const contains = pool.filter(p => !normalizeArabicSearch(p.name).startsWith(q) && normalizeArabicSearch(p.name).includes(q));
+            list = starts.concat(contains);
+        }
+        shown = list.slice(0, 40);
+        if (!shown.length) { hide(); return; }
+        active = -1;
+        paint();
+        box.classList.remove('hidden');
+    };
+    input.addEventListener('input', render);
+    input.addEventListener('focus', render);
+    input.addEventListener('keydown', (e) => {
+        if (box.classList.contains('hidden')) return;
+        if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(shown.length - 1, active + 1); paint(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, active - 1); paint(); }
+        else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); pick(shown[active].name); }
+        else if (e.key === 'Escape') { hide(); }
+    });
+    box.addEventListener('mousedown', (e) => {
+        const row = e.target.closest('[data-i]');
+        if (!row) return;
+        e.preventDefault();
+        pick(shown[Number(row.dataset.i)].name);
+    });
+    document.addEventListener('click', (e) => { if (e.target !== input && !box.contains(e.target)) hide(); });
+}
+document.addEventListener('DOMContentLoaded', initRetailProductAutocomplete);
+
 // ==================== Retail - دوال المنتجات ====================
 function handleRetailProductSearch(val) {
     const sizeSelect = document.getElementById('retail-size-select');
@@ -3763,22 +3887,7 @@ function handleRetailProductSearch(val) {
     sizeSelect.innerHTML = '<option value="">اختر المقاس...</option>';
     updateRetailStockDisplay();
 
-    // إصلاح مشكلة شائعة في المتصفح: بعد ما تختار منتج وتمسح الكتابة، قائمة الاقتراحات
-    // ممكن متظهرش تاني إلا لو دوست برة الخانة ووقفت عليها من جديد. الحل إننا نعيد
-    // تعبئة القائمة، ولو الخانة بقت فاضية نعمل blur/focus سريع يجبر المتصفح يفتح
-    // قائمة الاقتراحات تلقائيًا من غير ما يحتاج المستخدم يدوس تاني بنفسه.
-    const productInput = document.getElementById('retail-product-search');
-    if (productInput) {
-        populateRetailProductDatalist(retailSelectedCompany);
-        if (val === '' && document.activeElement === productInput) {
-            productInput.blur();
-            requestAnimationFrame(() => productInput.focus());
-        } else {
-            productInput.removeAttribute('list');
-            requestAnimationFrame(() => productInput.setAttribute('list', 'retail-products-datalist'));
-        }
-    }
-
+    // (قائمة الاقتراحات بقت قائمة مخصوصة بتظهر مع الكتابة — شوفي initRetailProductAutocomplete)
     const product = findProductByNameAndCompany(val, retailSelectedCompany);
     if (!product || !Array.isArray(product.variants)) return;
 
@@ -4013,9 +4122,10 @@ function filterRetailInvoicesByCustomer() {
 
     container.innerHTML = '';
 
+    // أحدث فاتورة تظهر الأول
     const filteredInvoices = savedRetailInvoices.filter(inv =>
         inv.customer && inv.customer.toLowerCase().includes(filter)
-    );
+    ).sort((a, b) => (Number(b.date) || 0) - (Number(a.date) || 0));
 
     if (filteredInvoices.length === 0) {
         container.innerHTML = `
@@ -4048,7 +4158,7 @@ function updateRetailTotalAndRemaining() {
     const customerName = document.getElementById('retail-customer-name').value.trim();
 
     // تصحيح اسم الدالة (مهم جداً)
-    const previousDebt = getRetailCustomerPreviousDebt(customerName, editingRetailInvoiceIndex);
+    const previousDebt = posPreviousDebt(customerName);
     
     const grandTotal = currentTotal + previousDebt;
     let remaining = grandTotal - paid;
@@ -4066,6 +4176,19 @@ function updateRetailTotalAndRemaining() {
         remainingEl.style.color = remaining > 0 ? "#dc2626" : "#16a34a";
     }
 
+    // صندوق: عليه X سابقًا + الفاتورة الحالية Y = الإجمالي Z
+    const breakdownEl = document.getElementById('retail-total-breakdown');
+    if (breakdownEl) {
+        if (previousDebt > 0) {
+            breakdownEl.innerHTML = `عليه <b>${previousDebt.toFixed(2)}</b> جنيه سابقًا &nbsp;+&nbsp; <b>${currentTotal.toFixed(2)}</b> جنيه الفاتورة الحالية &nbsp;=&nbsp; <b class="text-lg">${grandTotal.toFixed(2)}</b> جنيه الإجمالي النهائي`;
+            breakdownEl.classList.remove('hidden');
+        } else {
+            breakdownEl.classList.add('hidden');
+            breakdownEl.innerHTML = '';
+        }
+    }
+
+    scheduleDraftSave();
     return { currentTotal, rawTotal, discount, grandTotal, paid, remaining: Math.max(0, remaining), previousDebt };
 }
 
@@ -4294,7 +4417,174 @@ function refreshAllStockViews() {
     updateRetailStockDisplay();
 }
 
-function saveRetailInvoice() {
+// ==================== فواتير لم يتم استكمالها (بتتحفظ تلقائي على الجهاز) ====================
+// أي فاتورة جديدة بتكتبيها بتتحفظ لوحدها مع كل تغيير. لو الجهاز فصل أو المتصفح اتقفل
+// بتلاقيها فوق في نقطة البيع تحت "فواتير لم يتم استكمالها" وتكمّليها.
+const DRAFTS_KEY = 'pos_unfinished_invoices_v1';
+let currentDraftId = null;
+let draftTimer = null;
+
+function loadDrafts() {
+    try { const v = JSON.parse(localStorage.getItem(DRAFTS_KEY) || '[]'); return Array.isArray(v) ? v : []; }
+    catch (e) { return []; }
+}
+function storeDrafts(list) {
+    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(list)); } catch (e) { /* المساحة ممتلئة أو التخزين مقفول */ }
+}
+function scheduleDraftSave() {
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(saveCurrentDraft, 500);
+}
+function saveCurrentDraft() {
+    clearTimeout(draftTimer);
+    if (editingRetailInvoiceIndex !== null) return;          // تعديل فاتورة محفوظة مش مسودة
+    let list = loadDrafts();
+    if (!Array.isArray(retailInvoice) || retailInvoice.length === 0) {
+        if (currentDraftId) {                                // فضيت الفاتورة: نشيل مسودتها
+            list = list.filter(d => d.id !== currentDraftId);
+            storeDrafts(list);
+            currentDraftId = null;
+            renderDraftsPanel();
+        }
+        return;
+    }
+    if (!currentDraftId) currentDraftId = 'd' + Date.now() + Math.floor(Math.random() * 1000);
+    const val = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
+    const total = retailInvoice.reduce((s, it) => s + (Number(it.subtotal) || 0), 0);
+    const draft = {
+        id: currentDraftId,
+        customer: val('retail-customer-name'),
+        items: JSON.parse(JSON.stringify(retailInvoice)),
+        paid: val('retail-paid-input'),
+        discountType: val('retail-discount-type'),
+        discountValue: val('retail-discount-input'),
+        company: retailSelectedCompany || '',
+        sessionAddedAt: retailSessionAddedAt,
+        total: Number(total.toFixed(2)),
+        updatedAt: Date.now()
+    };
+    const i = list.findIndex(d => d.id === currentDraftId);
+    if (i >= 0) list[i] = draft; else list.push(draft);
+    storeDrafts(list);
+    renderDraftsPanel();
+}
+function discardCurrentDraft() {
+    clearTimeout(draftTimer);
+    if (currentDraftId) {
+        storeDrafts(loadDrafts().filter(d => d.id !== currentDraftId));
+        currentDraftId = null;
+    }
+    renderDraftsPanel();
+}
+function renderDraftsPanel() {
+    const panel = document.getElementById('retail-drafts-panel');
+    if (!panel) return;
+    const list = loadDrafts().filter(d => d.id !== currentDraftId).sort((a, b) => b.updatedAt - a.updatedAt);
+    if (!list.length) { panel.classList.add('hidden'); panel.innerHTML = ''; return; }
+    panel.classList.remove('hidden');
+    panel.innerHTML = `
+        <div class="font-bold text-amber-800 mb-3">⏳ فواتير لم يتم استكمالها (${list.length})</div>
+        <div class="space-y-2">
+            ${list.map(d => `
+                <div class="bg-white rounded-xl border border-amber-100 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                    <div class="text-sm">
+                        <div class="font-semibold text-slate-800">${(d.customer || '').trim() || 'من غير اسم عميل'}</div>
+                        <div class="text-xs text-slate-400">${(d.items || []).length} منتج — ${Number(d.total || 0).toFixed(2)} جنيه — ${formatRetailDateTime(d.updatedAt)}</div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="resumeDraft('${d.id}')" class="btn-success !px-4 !py-2 text-sm">استكمال</button>
+                        <button onclick="deleteDraft('${d.id}')" class="btn-secondary !px-4 !py-2 text-sm">حذف</button>
+                    </div>
+                </div>`).join('')}
+        </div>`;
+}
+window.resumeDraft = function (id) {
+    const d = loadDrafts().find(x => x.id === id);
+    if (!d) return;
+    if (editingRetailInvoiceIndex !== null) {
+        return alert(' فيه فاتورة بتتعدل دلوقتي — خلّصيها أو ألغي التعديل الأول');
+    }
+    saveCurrentDraft();   // لو فيه فاتورة شغالة دلوقتي بتتحفظ كمسودة (مش هتضيع)
+    currentDraftId = d.id;
+    retailInvoice = JSON.parse(JSON.stringify(d.items || []));
+    retailStaging = [];
+    retailSessionAddedAt = d.sessionAddedAt || Date.now();
+    retailSelectedCompany = d.company || '';
+    const set = (elId, v) => { const el = document.getElementById(elId); if (el) el.value = v; };
+    set('retail-company-filter', retailSelectedCompany);
+    set('retail-customer-name', d.customer || '');
+    set('retail-paid-input', d.paid === '' || d.paid === undefined ? '0' : d.paid);
+    set('retail-discount-type', d.discountType || 'amount');
+    set('retail-discount-input', d.discountValue || '0');
+    renderRetailTable();
+    renderRetailStaging();
+    renderRetailPercentGroups();
+    updateRetailTotalAndRemaining();
+    updateRetailInvoiceHeader();
+    showAmountWords(document.getElementById('retail-paid-input'));
+    renderDraftsPanel();
+    showSection('retail');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    showToast(' تم فتح الفاتورة غير المكتملة — كمّلي واحفظي', 'success');
+};
+window.deleteDraft = function (id) {
+    if (!confirm('هل تريد حذف هذه الفاتورة غير المكتملة؟')) return;
+    storeDrafts(loadDrafts().filter(d => d.id !== id));
+    renderDraftsPanel();
+};
+document.addEventListener('DOMContentLoaded', () => {
+    renderDraftsPanel();
+    const nameEl = document.getElementById('retail-customer-name');
+    if (nameEl) nameEl.addEventListener('input', scheduleDraftSave);
+    const paidEl = document.getElementById('retail-paid-input');
+    if (paidEl) paidEl.addEventListener('input', () => { showAmountWords(paidEl); });
+});
+
+// دين العميل السابق حسب نوع الفاتورة (قطاعي أو تجاري)
+function posPreviousDebt(name) {
+    if (editingRetailInvoiceIndex !== null && editingRetailKind === 'wholesale') {
+        return getCustomerPreviousDebt(name, editingRetailInvoiceIndex);
+    }
+    return getRetailCustomerPreviousDebt(name, editingRetailInvoiceIndex);
+}
+
+// نافذة اختيار نوع الفاتورة عند الحفظ: قطاعي ولا تجاري
+function askInvoiceKind(customerName) {
+    return new Promise(resolve => {
+        const name = (customerName || '').trim();
+        const retailPrev = name ? getRetailCustomerPreviousDebt(name, -1) : 0;
+        const wholePrev = name ? getCustomerPreviousDebt(name, -1) : 0;
+        const overlay = document.createElement('div');
+        overlay.className = 'fixed inset-0 z-[9999] flex items-center justify-center p-4';
+        overlay.style.background = 'rgba(15,23,42,.55)';
+        const hint = (v) => v > 0 ? `<div class="text-xs text-red-600 mt-1">عليه ${v.toFixed(2)} جنيه سابقًا</div>` : '';
+        overlay.innerHTML = `
+            <div class="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md" dir="rtl">
+                <h3 class="font-bold text-lg mb-1 text-slate-800">هتحفظي الفاتورة فين؟</h3>
+                <p class="text-sm text-slate-400 mb-5">${name ? 'العميل: ' + name : 'عميل غير محدد'}</p>
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                    <button type="button" data-kind="retail" class="py-5 rounded-xl border-2 border-rose-200 hover:border-rose-500 hover:bg-rose-50 font-bold text-rose-700">
+                        🛍️ قطاعي${hint(retailPrev)}
+                    </button>
+                    <button type="button" data-kind="wholesale" class="py-5 rounded-xl border-2 border-blue-200 hover:border-blue-500 hover:bg-blue-50 font-bold text-blue-700">
+                        🏪 تجاري${hint(wholePrev)}
+                    </button>
+                </div>
+                <button type="button" data-kind="" class="w-full py-3 rounded-xl bg-slate-100 text-slate-600 font-medium">رجوع للفاتورة</button>
+            </div>`;
+        const done = (kind) => { document.removeEventListener('keydown', onKey); overlay.remove(); resolve(kind || null); };
+        const onKey = (e) => { if (e.key === 'Escape') done(null); };
+        document.addEventListener('keydown', onKey);
+        overlay.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-kind]');
+            if (b) done(b.dataset.kind);
+            else if (e.target === overlay) done(null);
+        });
+        document.body.appendChild(overlay);
+    });
+}
+
+async function saveRetailInvoice() {
     const customerInput = document.getElementById('retail-customer-name');
     const customer = customerInput ? customerInput.value.trim() : 'عميل غير محدد';
 
@@ -4302,10 +4592,17 @@ function saveRetailInvoice() {
         return alert(' الفاتورة فاضية!');
     }
 
+    // فاتورة جديدة: بنسأل تتحفظ قطاعي ولا تجاري. فاتورة بتتعدل: بتفضل في نوعها.
+    const kind = editingRetailInvoiceIndex !== null ? editingRetailKind : await askInvoiceKind(customerInput ? customerInput.value : '');
+    if (!kind) return;
+    const isWholesale = kind === 'wholesale';
+    const getStore = () => isWholesale ? savedInvoices : savedRetailInvoices;
+    const stockKind = isWholesale ? 'invoice' : 'retail';
+
     const { currentTotal, discount } = updateRetailTotalAndRemaining();
     const initialPaidValue = parseFloat(document.getElementById("retail-paid-input").value) || 0;
 
-    const oldInvoice = editingRetailInvoiceIndex !== null ? savedRetailInvoices[editingRetailInvoiceIndex] : null;
+    const oldInvoice = editingRetailInvoiceIndex !== null ? getStore()[editingRetailInvoiceIndex] : null;
 
     // ==================== سجل الدفعات ====================
     // فاتورة جديدة: خانة "المبلغ المدفوع" فوق الفاتورة بتبقى أول دفعة بتاريخ النهارده.
@@ -4334,6 +4631,8 @@ function saveRetailInvoice() {
         date: oldInvoice ? oldInvoice.date : Date.now()
     };
 
+    if (oldInvoice && oldInvoice.settled) invoice.settled = true;
+
     // سجل المرتجعات بتاع الفاتورة بيفضل زي ما هو حتى لو الفاتورة اتعدلت
     if (oldInvoice && Array.isArray(oldInvoice.returns)) {
         invoice.returns = JSON.parse(JSON.stringify(oldInvoice.returns));
@@ -4341,25 +4640,32 @@ function saveRetailInvoice() {
 
     // المخزون: الفاتورة الجديدة بتتحفظ "لسه متخصمتش"، والخصم بيتم بزرار "تم التسليم" بس.
     if (editingRetailInvoiceIndex !== null) {
-        const oldState = getInvoiceStockState(oldInvoice, 'retail');
+        const oldState = getInvoiceStockState(oldInvoice, stockKind);
         if (oldState === 'deducted') {
             // فاتورة اتسلّمت واتخصمت قبل كده وبتتعدل: نظبط المخزن على فرق الكميات بس
             adjustStockForItems(getStockItemsForInvoice(oldInvoice), +1);
             invoice.stockDeducted = true;
             if (oldInvoice.stockDeductedAt) invoice.stockDeductedAt = oldInvoice.stockDeductedAt;
-            savedRetailInvoices[editingRetailInvoiceIndex] = invoice;
+            getStore()[editingRetailInvoiceIndex] = invoice;
             adjustStockForItems(getStockItemsForInvoice(invoice), -1);
         } else {
             invoice.stockDeducted = false;
-            savedRetailInvoices[editingRetailInvoiceIndex] = invoice;
+            getStore()[editingRetailInvoiceIndex] = invoice;
         }
     } else {
         invoice.stockDeducted = false;
-        savedRetailInvoices.push(invoice);
+        getStore().push(invoice);
     }
 
-    recalculateAllRetailInvoicesForCustomer(customer);
-    saveAllRetailInvoices();
+    if (isWholesale) {
+        recalculateAllInvoicesForCustomer(customer);
+        saveAllInvoices();
+    } else {
+        recalculateAllRetailInvoicesForCustomer(customer);
+        saveAllRetailInvoices();
+    }
+    discardCurrentDraft();   // الفاتورة اتحفظت: نشيل مسودتها من "فواتير لم يتم استكمالها"
+    editingRetailKind = 'retail';
 
     // تصفير الفاتورة
     retailInvoice = [];
@@ -4394,10 +4700,12 @@ function saveRetailInvoice() {
 
     updateRetailInvoiceHeader();
     renderRetailInvoices();
+    renderSavedInvoices();
+    setRetailEditBanner();
 
-    setTimeout(getAllUniqueRetailCustomers, 100);
+    setTimeout(() => { getAllUniqueRetailCustomers(); if (typeof getAllUniqueCustomers === 'function') getAllUniqueCustomers(); }, 100);
 
-    showToast(' تم حفظ فاتورة القطاعي بنجاح', 'success');
+    showToast(isWholesale ? ' تم حفظ الفاتورة في التجاري بنجاح' : ' تم حفظ الفاتورة في القطاعي بنجاح', 'success');
 }
 
 // ==================== إعادة حساب كل فواتير العميل القطاعي ====================
@@ -4651,7 +4959,7 @@ function buildRetailCardHTML(inv, index) {
                 <div id="retail-edit-payment-form-${index}" class="hidden mt-4 bg-blue-50 border border-blue-200 rounded-xl p-4">
                     <label class="block text-sm font-semibold text-blue-700 mb-2">تعديل مبلغ الدفعة</label>
                     <div class="flex gap-2 flex-wrap">
-                        <input id="retail-edit-payment-amount-${index}" type="number" min="0" step="0.01" class="input-base flex-1 min-w-[140px]">
+                        <input id="retail-edit-payment-amount-${index}" oninput="showAmountWords(this)" type="number" min="0" step="0.01" class="input-base flex-1 min-w-[140px]">
                         <button onclick="saveEditedRetailPayment(${index})" class="btn-success !px-5">حفظ</button>
                         <button onclick="cancelEditRetailPayment(${index})" class="btn-secondary !px-5">إلغاء</button>
                     </div>
@@ -4660,7 +4968,7 @@ function buildRetailCardHTML(inv, index) {
                 <div id="retail-pay-form-${index}" class="hidden mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4">
                     <label class="block text-sm font-semibold text-amber-700 mb-2">إضافة دفعة جديدة (المتبقي حاليًا ${remaining.toFixed(2)} جنيه)</label>
                     <div class="flex gap-2 flex-wrap">
-                        <input id="retail-pay-amount-${index}" type="number" min="0" step="0.01" placeholder="المبلغ..." class="input-base flex-1 min-w-[140px]">
+                        <input id="retail-pay-amount-${index}" oninput="showAmountWords(this)" type="number" min="0" step="0.01" placeholder="المبلغ..." class="input-base flex-1 min-w-[140px]">
                         <button onclick="submitRetailPayment(${index})" class="btn-success !px-5">حفظ</button>
                         <button onclick="cancelRetailPayForm(${index})" class="btn-secondary !px-5">إلغاء</button>
                     </div>
@@ -4870,9 +5178,17 @@ window.toggleRetailInvoiceDetails = function(index) {
 window.editRetailSavedInvoice = function(index) {
     const invoice = savedRetailInvoices[index];
     if (!invoice) return;
-    if (!confirm('هل تريد تعديل هذه الفاتورة القطاعية؟')) return;
+    if (!confirm('هل تريد تعديل هذه الفاتورة (قطاعي)؟')) return;
+    loadInvoiceIntoPOS('retail', index, invoice);
+};
 
+// بتحمّل فاتورة محفوظة (قطاعي أو تجاري) في شاشة نقطة البيع للتعديل
+function loadInvoiceIntoPOS(kind, index, invoice) {
+    saveCurrentDraft();   // لو فيه فاتورة جديدة شغالة، نحفظها كمسودة قبل ما نفتح التعديل
+    clearTimeout(draftTimer);
+    editingRetailKind = kind;
     editingRetailInvoiceIndex = index;
+    currentDraftId = null;
     retailInvoice = JSON.parse(JSON.stringify(invoice.items));
     retailStaging = [];
     retailSessionAddedAt = Date.now(); // أي منتجات تتضاف أثناء التعديل ده كله هتاخد نفس التاريخ ده
@@ -4883,37 +5199,49 @@ window.editRetailSavedInvoice = function(index) {
     const paidInput = document.getElementById('retail-paid-input');
     if (paidInput) {
         paidInput.value = Number(invoice.paid || 0).toFixed(2);
-        // المبلغ المدفوع بقى بيتحدث بس من زرار "دفع المتبقي" في قائمة الفواتير،
+        // المبلغ المدفوع بيتحدث بس من زرار "دفع المتبقي" في قائمة الفواتير،
         // عشان منضربش سجل الدفعات القديم بتاريخه.
         paidInput.readOnly = true;
         paidInput.classList.add('opacity-60', 'cursor-not-allowed');
         paidInput.title = 'لإضافة دفعة جديدة استخدم زرار "دفع المتبقي" في قائمة الفواتير السابقة';
+        showAmountWords(paidInput);
     }
 
     setDiscountFieldsFromSaved('retail', invoice.discount);
 
     renderRetailTable();
     renderRetailStaging();
+    renderRetailPercentGroups();
     updateRetailTotalAndRemaining();
     updateRetailInvoiceHeader();
 
     const cancelBtn = document.getElementById('cancel-edit-retail-btn');
     if (cancelBtn) cancelBtn.classList.remove('hidden');
+    setRetailEditBanner();
 
     showSection('retail');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    showToast(` جاري تعديل فاتورة ${kind === 'wholesale' ? 'التجاري' : 'القطاعي'}... (لإضافة دفعة استخدم زرار دفع المتبقي)`, 'warning');
+}
 
-    showToast(' جاري تعديل فاتورة القطاعي... (لإضافة دفعة استخدم زرار دفع المتبقي)', 'warning');
-};
+function setRetailEditBanner() {
+    const el = document.getElementById('retail-edit-banner');
+    if (!el) return;
+    if (editingRetailInvoiceIndex === null) { el.classList.add('hidden'); el.textContent = ''; return; }
+    el.textContent = `✎ بتعدلي فاتورة ${editingRetailKind === 'wholesale' ? 'تجاري' : 'قطاعي'} — هتتحفظ في نفس مكانها`;
+    el.classList.remove('hidden');
+}
 
 // ==================== إلغاء التعديل والرجوع للفاتورة الأصلية كما كانت محفوظة ====================
 window.cancelEditRetailInvoice = function() {
     if (!confirm('هل تريد إلغاء التعديل؟ أي تغييرات عملتها في الفاتورة دي هتتلغي.')) return;
 
     editingRetailInvoiceIndex = null;
+    editingRetailKind = 'retail';
     retailInvoice = [];
     retailStaging = [];
     retailSessionAddedAt = Date.now();
+    setRetailEditBanner();
 
     const customerInput = document.getElementById('retail-customer-name');
     if (customerInput) customerInput.value = '';
@@ -5173,7 +5501,7 @@ window.printRetailSavedInvoice = async function(index) {
 // ==================== اقتراح أسماء العملاء القطاعي ====================
 function getAllUniqueRetailCustomers() {
     const customersSet = new Set();
-    savedRetailInvoices.forEach(inv => {
+    savedRetailInvoices.concat(savedInvoices || []).forEach(inv => {
         if (inv.customer && inv.customer !== 'عميل غير محدد') {
             customersSet.add(inv.customer.trim());
         }
@@ -5312,7 +5640,7 @@ function updateRetailInvoiceHeader() {
     if (!customerNameInput || !balanceEl) return;
 
     const name = customerNameInput.value.trim() || 'عميل غير محدد';
-    const previousBalance = getRetailCustomerPreviousDebt(name, editingRetailInvoiceIndex);
+    const previousBalance = posPreviousDebt(name);
 
     if (previousBalance > 0) {
         balanceEl.innerHTML = `<span class="text-red-600">عليه ${previousBalance.toFixed(2)} جنيه سابقًا</span>`;
@@ -5359,10 +5687,13 @@ async function loadRetailInvoices() {
 
 
 function clearRetailInvoice() {
-    if (confirm('هل تريد مسح الفاتورة القطاعية؟')) {
+    if (confirm('هل تريد مسح الفاتورة الحالية؟')) {
         retailInvoice = [];
         retailStaging = [];
         editingRetailInvoiceIndex = null;
+        editingRetailKind = 'retail';
+        setRetailEditBanner();
+        discardCurrentDraft();
         retailSessionAddedAt = Date.now();
         const paidInput = document.getElementById('retail-paid-input');
         if (paidInput) {
@@ -5862,7 +6193,18 @@ function printSummaryCardHtml(opts) {
     }
     rows.push({ label: 'المبلغ المدفوع', value: `${paid.toFixed(2)} جنيه`, good: true });
 
+    // صندوق توضيحي: السابق + الفاتورة الجديدة = الإجمالي النهائي
+    const currentPart = Math.max(0, grandTotal - previousDebt);
+    const breakdownBox = previousDebt > 0 ? `
+        <div style="margin:0 0 10px;padding:10px 14px;border:2px solid #F59E0B;background:#FFFBEB;border-radius:10px;
+                    text-align:center;font-weight:700;color:#92400E;font-size:14px;line-height:1.9;">
+            عليه ${previousDebt.toFixed(2)} جنيه سابقًا
+            &nbsp;+&nbsp; ${currentPart.toFixed(2)} جنيه الفاتورة الحالية
+            &nbsp;=&nbsp; <span style="font-size:16px;color:#B45309;">${grandTotal.toFixed(2)} جنيه</span> الإجمالي النهائي
+        </div>` : '';
+
     return `
+        ${breakdownBox}
         <div class="summary-card">
             ${rows.map(r => `
                 <div class="summary-row${r.strong ? ' strong' : ''}">
