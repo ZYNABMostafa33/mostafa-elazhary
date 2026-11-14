@@ -2053,6 +2053,35 @@ function invoiceItemsRowsHtml(items, invIndex) {
     `).join('');
 }
 
+// ==================== تاريخ "ميلاد" الدين السابق ====================
+// الدين السابق بيتراكم من فاتورة لفاتورة. تاريخ ميلاده = تاريخ أول فاتورة بدأ منها الدين الحالي
+// (آخر مرة العميل كان فيها خالص صفر ثم بقى عليه فلوس) — لو العميل سدّد كله ورجع اشترى، بيبدأ تاريخ جديد.
+function computeDebtOrigin(list, customerName, excludeIndex) {
+    if (!customerName || customerName === 'عميل غير محدد') return 0;
+    const invs = (list || [])
+        .map((inv, idx) => ({ inv, idx }))
+        .filter(x => x.inv.customer === customerName && x.idx !== excludeIndex)
+        .sort((a, b) => a.inv.date - b.inv.date);
+    let running = 0, origin = 0;
+    for (const { inv } of invs) {
+        const total = getNetTotal(inv);
+        const paid = Number(inv.paid) || 0;
+        const next = inv.settled ? 0 : Math.max(0, (total + running) - paid);
+        if (next > 0 && running <= 0) origin = Number(inv.date) || 0;   // الدين بدأ من هنا
+        if (next <= 0) origin = 0;
+        running = next;
+    }
+    return running > 0 ? origin : 0;
+}
+function getPreviousDebtOrigin(customerName, excludeIndex = -1) { return computeDebtOrigin(savedInvoices, customerName, excludeIndex); }
+function getRetailPreviousDebtOrigin(customerName, excludeIndex = -1) { return computeDebtOrigin(savedRetailInvoices, customerName, excludeIndex); }
+function fmtDebtDate(ts) {
+    if (!ts) return '';
+    return new Date(ts).toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+// نص جاهز: " — من 12 سبتمبر 2026" (فاضي لو مفيش تاريخ)
+function debtDateText(ts) { return ts ? ` — من ${fmtDebtDate(ts)}` : ''; }
+
 // ==================== حساب الرصيد السابق لعميل ====================
 function getCustomerPreviousDebt(customerName, excludeIndex = -1) {
     if (!customerName || customerName === 'عميل غير محدد') return 0;
@@ -2428,6 +2457,7 @@ function buildInvoiceCardHTML(inv, index) {
                         <div class="text-xs text-gray-500 mb-1">${getReturnsTotal(inv) > 0 ? 'إجمالي الفاتورة (بعد خصم المرتجعات)' : 'إجمالي الفاتورة'}</div>
                         <div class="text-2xl font-bold text-blue-600">${grandTotal.toFixed(2)} جنيه</div>
                         ${Number(inv.discount) > 0 ? `<div class="text-xs text-amber-600 mt-1">(بعد خصم ${Number(inv.discount).toFixed(2)} جنيه)</div>` : ''}
+                        ${previousDebt > 0 ? `<div class="text-xs text-red-600 font-semibold mt-1">منهم ${previousDebt.toFixed(2)} جنيه سابقين${debtDateText(getPreviousDebtOrigin(inv.customer, index))}</div>` : ''}
                     </div>
                     ${paymentsHistory.length > 0 ? `
                         <div class="space-y-2 mt-4 pt-4 border-t">
@@ -2618,71 +2648,14 @@ window.deleteInvoicePayment = async function(index, paymentId) {
     showToast(' تم حذف الدفعة', 'error');
 };
 
-function renderSavedInvoices() {
-    const container = document.getElementById('saved-invoices-list');
-    if (!container) return;
-    container.innerHTML = '';
-
-    if (savedInvoices.length === 0) {
-        container.innerHTML = `
-            <div class="bg-white rounded-2xl p-10 text-center text-gray-500">
-                <p>لا توجد فواتير محفوظة بعد</p>
-            </div>
-        `;
-        return;
-    }
-
-    savedInvoices.forEach((inv, index) => {
-        const card = document.createElement('div');
-        card.className = 'bg-gray-50 rounded-xl p-4 shadow-sm';
-        card.innerHTML = buildInvoiceCardHTML(inv, index);
-        container.appendChild(card);
-    });
-}
+function renderSavedInvoices() { renderPosInvoices(); }
 
 function toggleInvoiceDetails(index) {
     const detailsDiv = document.getElementById(`invoice-details-${index}`);
     if (detailsDiv) detailsDiv.classList.toggle('hidden');
 }
 
-function filterInvoicesByCustomer() {
-    const input = document.getElementById('search-customer');
-    const container = document.getElementById('saved-invoices-list');
-    if (!container || !input) return;
-
-    const filter = input.value.trim().toLowerCase();
-
-    if (filter === '') {
-        renderSavedInvoices();
-        return;
-    }
-
-    container.innerHTML = '';
-
-    // أحدث فاتورة تظهر الأول
-    const filteredInvoices = savedInvoices.filter(inv =>
-        inv.customer && inv.customer.toLowerCase().includes(filter)
-    ).sort((a, b) => (Number(b.date) || 0) - (Number(a.date) || 0));
-
-    if (filteredInvoices.length === 0) {
-        container.innerHTML = `
-            <div class="bg-white rounded-2xl p-10 text-center text-gray-500">
-                <p>لا توجد فواتير مطابقة للبحث</p>
-            </div>
-        `;
-        return;
-    }
-
-    filteredInvoices.forEach((inv) => {
-        const realIndex = savedInvoices.findIndex(i => i === inv);
-        if (realIndex === -1) return;
-
-        const card = document.createElement('div');
-        card.className = 'bg-gray-50 rounded-xl p-4 shadow-sm';
-        card.innerHTML = buildInvoiceCardHTML(inv, realIndex);
-        container.appendChild(card);
-    });
-}
+function filterInvoicesByCustomer() { renderPosInvoices(); }
 
 function deleteSavedInvoice(index) {
     if (!confirm('هل أنت متأكد من حذف هذه الفاتورة؟ (هتتنقل لسلة المحذوفات ولو محدش رجّعها هتتحذف نهائي بعد 30 يوم)')) return;
@@ -2847,7 +2820,7 @@ async function printSavedInvoice(index) {
 
             <div style="margin-bottom: 20px;">
                 <strong>اسم الزبون:</strong> ${inv.customer}
-                ${previousDebt > 0 ? `<span style="color:red;"> (عليه ${previousDebt.toFixed(2)} جنيه سابقًا)</span>` : ''}
+                ${previousDebt > 0 ? `<span style="color:red;"> (عليه ${previousDebt.toFixed(2)} جنيه سابقًا${debtDateText(getPreviousDebtOrigin(inv.customer, index))})</span>` : ''}
             </div>
 
             <table>
@@ -2877,7 +2850,7 @@ async function printSavedInvoice(index) {
 
             ${printSummaryCardHtml({
                 gross: getGrossTotal(inv), returnsTotal: getReturnsTotal(inv), net: currentTotal,
-                discount: Number(inv.discount) || 0, previousDebt, grandTotal, paid, remaining,
+                discount: Number(inv.discount) || 0, previousDebt, previousDebtDate: getPreviousDebtOrigin(inv.customer, index), grandTotal, paid, remaining,
                 settled: !!inv.settled
             })}
 
@@ -4108,44 +4081,7 @@ function getRetailCustomerPreviousDebt(customerName, excludeIndex = -1) {
 }
 
 // ==================== بحث فواتير القطاعي السابقة ====================
-function filterRetailInvoicesByCustomer() {
-    const input = document.getElementById('search-retail-customer');
-    const container = document.getElementById('saved-retail-invoices-list');
-    if (!container || !input) return;
-
-    const filter = input.value.trim().toLowerCase();
-
-    if (filter === '') {
-        renderRetailInvoices();
-        return;
-    }
-
-    container.innerHTML = '';
-
-    // أحدث فاتورة تظهر الأول
-    const filteredInvoices = savedRetailInvoices.filter(inv =>
-        inv.customer && inv.customer.toLowerCase().includes(filter)
-    ).sort((a, b) => (Number(b.date) || 0) - (Number(a.date) || 0));
-
-    if (filteredInvoices.length === 0) {
-        container.innerHTML = `
-            <div class="bg-white rounded-2xl p-10 text-center text-gray-500">
-                <p>لا توجد فواتير قطاعي مطابقة للبحث</p>
-            </div>
-        `;
-        return;
-    }
-
-    filteredInvoices.forEach((inv) => {
-        const realIndex = savedRetailInvoices.findIndex(i => i === inv);
-        if (realIndex === -1) return;
-
-        const card = document.createElement('div');
-        card.className = 'bg-gray-50 rounded-xl p-4 shadow-sm';
-        card.innerHTML = buildRetailCardHTML(inv, realIndex);
-        container.appendChild(card);
-    });
-}
+function filterRetailInvoicesByCustomer() { renderPosInvoices(); }
 
 // ==================== تحديث الإجمالي + الدين + المتبقي للقطاعي ====================
 function updateRetailTotalAndRemaining() {
@@ -4180,7 +4116,7 @@ function updateRetailTotalAndRemaining() {
     const breakdownEl = document.getElementById('retail-total-breakdown');
     if (breakdownEl) {
         if (previousDebt > 0) {
-            breakdownEl.innerHTML = `عليه <b>${previousDebt.toFixed(2)}</b> جنيه سابقًا &nbsp;+&nbsp; <b>${currentTotal.toFixed(2)}</b> جنيه الفاتورة الحالية &nbsp;=&nbsp; <b class="text-lg">${grandTotal.toFixed(2)}</b> جنيه الإجمالي النهائي`;
+            breakdownEl.innerHTML = `عليه <b>${previousDebt.toFixed(2)}</b> جنيه سابقًا <span class="text-sm font-normal">${debtDateText(posDebtOrigin(customerName))}</span> &nbsp;+&nbsp; <b>${currentTotal.toFixed(2)}</b> جنيه الفاتورة الحالية &nbsp;=&nbsp; <b class="text-lg">${grandTotal.toFixed(2)}</b> جنيه الإجمالي النهائي`;
             breakdownEl.classList.remove('hidden');
         } else {
             breakdownEl.classList.add('hidden');
@@ -4459,6 +4395,7 @@ function saveCurrentDraft() {
         discountType: val('retail-discount-type'),
         discountValue: val('retail-discount-input'),
         company: retailSelectedCompany || '',
+        kind: posKind,
         sessionAddedAt: retailSessionAddedAt,
         total: Number(total.toFixed(2)),
         updatedAt: Date.now()
@@ -4510,6 +4447,8 @@ window.resumeDraft = function (id) {
     retailStaging = [];
     retailSessionAddedAt = d.sessionAddedAt || Date.now();
     retailSelectedCompany = d.company || '';
+    posKind = d.kind || null;
+    paintPosKind();
     const set = (elId, v) => { const el = document.getElementById(elId); if (el) el.value = v; };
     set('retail-company-filter', retailSelectedCompany);
     set('retail-customer-name', d.customer || '');
@@ -4533,6 +4472,8 @@ window.deleteDraft = function (id) {
     renderDraftsPanel();
 };
 document.addEventListener('DOMContentLoaded', () => {
+    paintPosKind();
+    renderPosInvoices();
     renderDraftsPanel();
     const nameEl = document.getElementById('retail-customer-name');
     if (nameEl) nameEl.addEventListener('input', scheduleDraftSave);
@@ -4540,12 +4481,72 @@ document.addEventListener('DOMContentLoaded', () => {
     if (paidEl) paidEl.addEventListener('input', () => { showAmountWords(paidEl); });
 });
 
+// ==================== نوع الفاتورة (قطاعي / تجاري) — بيتحدد قبل ما تضيفي المنتجات ====================
+// قطاعي = كل منتج بيتضاف بسعر القطاعي. تجاري = كل منتج بيتضاف بسعر التجاري.
+let posKind = null;   // null (لسه ما اتحددش) | 'retail' | 'wholesale'
+
+function posCurrentKind() {
+    return editingRetailInvoiceIndex !== null ? editingRetailKind : posKind;
+}
+// السعر الأساسي للمقاس حسب النوع. للتجاري لو السعر التجاري لسه مضافش بيرجّع null
+function posBasePriceOf(variant) {
+    if (!variant) return 0;
+    if (posCurrentKind() === 'wholesale') {
+        const w = Number(variant.wholesalePrice);
+        return w > 0 ? w : null;
+    }
+    return Number(variant.price) || 0;
+}
+function paintPosKind() {
+    const kind = posCurrentKind();
+    const locked = editingRetailInvoiceIndex !== null;
+    const styles = {
+        retail:    ['border-rose-500', 'bg-rose-50', 'text-rose-700'],
+        wholesale: ['border-blue-500', 'bg-blue-50', 'text-blue-700']
+    };
+    ['retail', 'wholesale'].forEach(k => {
+        const el = document.getElementById('pos-kind-' + k);
+        if (!el) return;
+        ['border-rose-500', 'bg-rose-50', 'text-rose-700', 'border-blue-500', 'bg-blue-50', 'text-blue-700', 'opacity-60', 'cursor-not-allowed'].forEach(c => el.classList.remove(c));
+        if (kind === k) styles[k].forEach(c => el.classList.add(c));
+        if (locked && kind !== k) { el.classList.add('opacity-60', 'cursor-not-allowed'); }
+    });
+    const hint = document.getElementById('pos-kind-hint');
+    if (hint) {
+        hint.className = 'text-xs mt-2 ' + (kind ? 'text-slate-400' : 'text-red-500 font-semibold');
+        hint.textContent = !kind
+            ? 'اختاري نوع الفاتورة الأول — الأسعار هتتحدد على حسبه.'
+            : (kind === 'wholesale' ? 'كل المنتجات هتتضاف بالسعر التجاري.' : 'كل المنتجات هتتضاف بسعر القطاعي.');
+    }
+}
+function setPosKind(kind) {
+    if (editingRetailInvoiceIndex !== null) {
+        return alert(' نوع الفاتورة بيتحدد من الفاتورة المحفوظة ومينفعش يتغير وقت التعديل');
+    }
+    if (posKind !== null && kind !== posKind && retailInvoice.length > 0) {
+        return alert(' فيه منتجات متضافة بأسعار النوع الحالي. شيلي المنتجات أو امسحي الفاتورة الأول عشان تغيّري النوع');
+    }
+    posKind = kind;
+    paintPosKind();
+    updateRetailPriceDisplay();
+    updateRetailInvoiceHeader();
+    updateRetailTotalAndRemaining();
+}
+window.setPosKind = setPosKind;
+
 // دين العميل السابق حسب نوع الفاتورة (قطاعي أو تجاري)
 function posPreviousDebt(name) {
-    if (editingRetailInvoiceIndex !== null && editingRetailKind === 'wholesale') {
-        return getCustomerPreviousDebt(name, editingRetailInvoiceIndex);
-    }
-    return getRetailCustomerPreviousDebt(name, editingRetailInvoiceIndex);
+    const kind = posCurrentKind();
+    if (kind === 'wholesale') return getCustomerPreviousDebt(name, editingRetailInvoiceIndex !== null ? editingRetailInvoiceIndex : -1);
+    if (kind === 'retail') return getRetailCustomerPreviousDebt(name, editingRetailInvoiceIndex !== null ? editingRetailInvoiceIndex : -1);
+    return 0;
+}
+function posDebtOrigin(name) {
+    const kind = posCurrentKind();
+    const ex = editingRetailInvoiceIndex !== null ? editingRetailInvoiceIndex : -1;
+    if (kind === 'wholesale') return getPreviousDebtOrigin(name, ex);
+    if (kind === 'retail') return getRetailPreviousDebtOrigin(name, ex);
+    return 0;
 }
 
 // نافذة اختيار نوع الفاتورة عند الحفظ: قطاعي ولا تجاري
@@ -4593,8 +4594,8 @@ async function saveRetailInvoice() {
     }
 
     // فاتورة جديدة: بنسأل تتحفظ قطاعي ولا تجاري. فاتورة بتتعدل: بتفضل في نوعها.
-    const kind = editingRetailInvoiceIndex !== null ? editingRetailKind : await askInvoiceKind(customerInput ? customerInput.value : '');
-    if (!kind) return;
+    const kind = editingRetailInvoiceIndex !== null ? editingRetailKind : posKind;
+    if (!kind) return alert(' اختاري نوع الفاتورة (قطاعي أو تجاري) الأول');
     const isWholesale = kind === 'wholesale';
     const getStore = () => isWholesale ? savedInvoices : savedRetailInvoices;
     const stockKind = isWholesale ? 'invoice' : 'retail';
@@ -4666,6 +4667,8 @@ async function saveRetailInvoice() {
     }
     discardCurrentDraft();   // الفاتورة اتحفظت: نشيل مسودتها من "فواتير لم يتم استكمالها"
     editingRetailKind = 'retail';
+    posKind = null;
+    paintPosKind();
 
     // تصفير الفاتورة
     retailInvoice = [];
@@ -4933,6 +4936,7 @@ function buildRetailCardHTML(inv, index) {
                         <div class="text-xs text-gray-500 mb-1">${getReturnsTotal(inv) > 0 ? 'إجمالي الفاتورة (بعد خصم المرتجعات)' : 'إجمالي الفاتورة'}</div>
                         <div class="text-2xl font-bold text-blue-600">${grandTotal.toFixed(2)} جنيه</div>
                         ${Number(inv.discount) > 0 ? `<div class="text-xs text-amber-600 mt-1">(بعد خصم ${Number(inv.discount).toFixed(2)} جنيه)</div>` : ''}
+                        ${previousDebt > 0 ? `<div class="text-xs text-red-600 font-semibold mt-1">منهم ${previousDebt.toFixed(2)} جنيه سابقين${debtDateText(getRetailPreviousDebtOrigin(inv.customer, index))}</div>` : ''}
                     </div>
                     ${paymentsHistory.length > 0 ? `
                         <div class="space-y-2 mt-4 pt-4 border-t">
@@ -4994,23 +4998,56 @@ function buildRetailCardHTML(inv, index) {
 }
 
 // ==================== عرض الفواتير السابقة (كاملة مثل التجار) ====================
-function renderRetailInvoices() {
-    const container = document.getElementById('saved-retail-invoices-list');
-    if (!container) return;
-    container.innerHTML = '';
+// ==================== قائمة الفواتير السابقة (قطاعي + تجاري) ====================
+// من غير ما تدوسي على زرار: كل الفواتير مع بعض (الأحدث الأول). زرار "قطاعي" بيعرض القطاعي بس،
+// وزرار "تجاري" بيعرض التجاري بس. والبحث بالاسم شغال في الحالات التلاتة.
+let posInvoicesKindFilter = null;   // null = الكل | 'retail' | 'wholesale'
 
-    if (savedRetailInvoices.length === 0) {
-        container.innerHTML = `<div class="bg-white rounded-2xl p-10 text-center text-gray-500"><p>لا توجد فواتير قطاعي محفوظة بعد</p></div>`;
+function setPosInvoicesKind(kind) {
+    posInvoicesKindFilter = (posInvoicesKindFilter === kind) ? null : kind;   // دوسة تانية = رجوع للكل
+    renderPosInvoices();
+}
+window.setPosInvoicesKind = setPosInvoicesKind;
+
+function renderPosInvoices() {
+    const container = document.getElementById('pos-invoices-list');
+    if (!container) return;
+    const searchEl = document.getElementById('pos-invoices-search');
+    const q = searchEl ? searchEl.value.trim().toLowerCase() : '';
+
+    const nameMatches = (inv) => !q || (inv.customer && inv.customer.toLowerCase().includes(q));
+    let entries = [];
+    if (posInvoicesKindFilter !== 'wholesale') savedRetailInvoices.forEach((inv, i) => { if (nameMatches(inv)) entries.push({ kind: 'retail', inv, i }); });
+    if (posInvoicesKindFilter !== 'retail') savedInvoices.forEach((inv, i) => { if (nameMatches(inv)) entries.push({ kind: 'wholesale', inv, i }); });
+    entries.sort((a, b) => (Number(b.inv.date) || 0) - (Number(a.inv.date) || 0));   // الأحدث الأول
+
+    // الأزرار: الحالة + العدد
+    const btnR = document.getElementById('pos-filter-retail');
+    const btnW = document.getElementById('pos-filter-wholesale');
+    const on = { retail: ['border-rose-500', 'bg-rose-50', 'text-rose-700'], wholesale: ['border-blue-500', 'bg-blue-50', 'text-blue-700'] };
+    [['retail', btnR, savedRetailInvoices.length, 'فواتير القطاعي'], ['wholesale', btnW, savedInvoices.length, 'فواتير التجاري']].forEach(([k, el, n, label]) => {
+        if (!el) return;
+        ['border-rose-500', 'bg-rose-50', 'text-rose-700', 'border-blue-500', 'bg-blue-50', 'text-blue-700'].forEach(c => el.classList.remove(c));
+        if (posInvoicesKindFilter === k) on[k].forEach(c => el.classList.add(c));
+        el.textContent = `${k === 'retail' ? '🛍️' : '🏪'} ${label} (${n})`;
+    });
+
+    container.innerHTML = '';
+    if (entries.length === 0) {
+        container.innerHTML = `<div class="bg-white rounded-2xl p-10 text-center text-gray-500"><p>${q ? 'مفيش فواتير بالاسم ده' : 'لا توجد فواتير محفوظة بعد'}</p></div>`;
         return;
     }
-
-    savedRetailInvoices.forEach((inv, index) => {
+    entries.forEach(({ kind, inv, i }) => {
         const card = document.createElement('div');
         card.className = 'bg-gray-50 rounded-xl p-4 shadow-sm';
-        card.innerHTML = buildRetailCardHTML(inv, index);
+        const badge = kind === 'wholesale'
+            ? '<span class="inline-block text-xs font-bold px-3 py-1 rounded-full bg-blue-100 text-blue-700 mb-3">🏪 تجاري</span>'
+            : '<span class="inline-block text-xs font-bold px-3 py-1 rounded-full bg-rose-100 text-rose-700 mb-3">🛍️ قطاعي</span>';
+        card.innerHTML = badge + (kind === 'wholesale' ? buildInvoiceCardHTML(inv, i) : buildRetailCardHTML(inv, i));
         container.appendChild(card);
     });
 }
+function renderRetailInvoices() { renderPosInvoices(); }
 
 // ==================== اعتبار فاتورة "خالصة" يدويًا حتى لو المدفوع أقل من الإجمالي ====================
 // ده مش بيغير المبلغ المدفوع الفعلي ولا يضيف دفعة وهمية، بس بيخلي المتبقي = صفر في العرض
@@ -5218,6 +5255,7 @@ function loadInvoiceIntoPOS(kind, index, invoice) {
     const cancelBtn = document.getElementById('cancel-edit-retail-btn');
     if (cancelBtn) cancelBtn.classList.remove('hidden');
     setRetailEditBanner();
+    paintPosKind();
 
     showSection('retail');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -5238,10 +5276,12 @@ window.cancelEditRetailInvoice = function() {
 
     editingRetailInvoiceIndex = null;
     editingRetailKind = 'retail';
+    posKind = null;
     retailInvoice = [];
     retailStaging = [];
     retailSessionAddedAt = Date.now();
     setRetailEditBanner();
+    paintPosKind();
 
     const customerInput = document.getElementById('retail-customer-name');
     if (customerInput) customerInput.value = '';
@@ -5433,7 +5473,7 @@ window.printRetailSavedInvoice = async function(index) {
 
             <div style="margin-bottom: 20px; font-size: 15px;">
                 <strong>اسم العميل:</strong> ${inv.customer}
-                ${previousDebt > 0 ? `<span style="color:#dc2626;"> (عليه ${previousDebt.toFixed(2)} جنيه سابقًا)</span>` : ''}
+                ${previousDebt > 0 ? `<span style="color:#dc2626;"> (عليه ${previousDebt.toFixed(2)} جنيه سابقًا${debtDateText(getRetailPreviousDebtOrigin(inv.customer, index))})</span>` : ''}
             </div>
 
             <table>
@@ -5475,7 +5515,7 @@ window.printRetailSavedInvoice = async function(index) {
 
             ${printSummaryCardHtml({
                 gross: getGrossTotal(inv), returnsTotal: getReturnsTotal(inv), net: currentTotal,
-                discount: Number(inv.discount) || 0, previousDebt, grandTotal, paid, remaining,
+                discount: Number(inv.discount) || 0, previousDebt, previousDebtDate: getRetailPreviousDebtOrigin(inv.customer, index), grandTotal, paid, remaining,
                 settled: !!inv.settled
             })}
 
@@ -5587,24 +5627,13 @@ window.renderDebtsList = function() {
 
 // بيودّيك من صفحة الديون لشاشة فواتير التاجر أو القطاعي، وبيبحث فيها باسم العميل على طول
 window.goToCustomerDebt = function(customerName, type) {
-    showSection(type);
-    if (type === 'retail') {
-        const input = document.getElementById('search-retail-customer');
-        if (input) {
-            input.value = customerName;
-            filterRetailInvoicesByCustomer();
-        }
-        const list = document.getElementById('saved-retail-invoices-list');
-        if (list) list.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } else {
-        const input = document.getElementById('search-customer');
-        if (input) {
-            input.value = customerName;
-            filterInvoicesByCustomer();
-        }
-        const list = document.getElementById('saved-invoices-list');
-        if (list) list.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    showSection('retail');
+    posInvoicesKindFilter = type === 'retail' ? 'retail' : 'wholesale';
+    const input = document.getElementById('pos-invoices-search');
+    if (input) input.value = customerName;
+    renderPosInvoices();
+    const list = document.getElementById('pos-invoices-list');
+    if (list) list.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
 function setupRetailCustomerAutocomplete() {
@@ -5640,21 +5669,20 @@ function updateRetailInvoiceHeader() {
     if (!customerNameInput || !balanceEl) return;
 
     const name = customerNameInput.value.trim() || 'عميل غير محدد';
-    const previousBalance = posPreviousDebt(name);
-
-    if (previousBalance > 0) {
-        balanceEl.innerHTML = `<span class="text-red-600">عليه ${previousBalance.toFixed(2)} جنيه سابقًا</span>`;
-        balanceEl.className = "px-5 py-4 rounded-2xl text-sm font-medium bg-red-50 text-red-600 flex items-center min-w-[180px]";
-    } 
-    else if (previousBalance < 0) {
-        const credit = Math.abs(previousBalance);
-        balanceEl.innerHTML = `<span class="text-emerald-600">ليه رصيد زائد ${credit.toFixed(2)} جنيه</span>`;
-        balanceEl.className = "px-5 py-4 rounded-2xl text-sm font-medium bg-emerald-50 text-emerald-600 flex items-center min-w-[180px]";
-    } 
-    else {
-        balanceEl.innerHTML = `<span class="text-gray-500">لا يوجد رصيد سابق</span>`;
-        balanceEl.className = "px-5 py-4 rounded-2xl text-sm font-medium bg-gray-50 text-gray-500 flex items-center min-w-[180px]";
+    if (!posCurrentKind()) {
+        balanceEl.innerHTML = `<span class="text-slate-400">اختاري نوع الفاتورة</span>`;
+        balanceEl.className = "px-5 py-3 rounded-xl text-sm font-medium bg-slate-50 text-slate-400 flex items-center justify-center min-w-[180px]";
+        return;
     }
+    const previousBalance = posPreviousDebt(name);
+    if (previousBalance > 0) {
+        balanceEl.innerHTML = `<span class="text-red-600">عليه ${previousBalance.toFixed(2)} جنيه سابقًا<span class="block text-xs font-normal">${debtDateText(posDebtOrigin(name)).replace(' — ', '')}</span></span>`;
+        balanceEl.className = "px-5 py-3 rounded-xl text-sm font-medium bg-red-50 text-red-600 flex items-center justify-center min-w-[180px] text-center";
+    } else {
+        balanceEl.innerHTML = `<span class="text-gray-500">لا يوجد رصيد سابق</span>`;
+        balanceEl.className = "px-5 py-3 rounded-xl text-sm font-medium bg-gray-50 text-gray-500 flex items-center justify-center min-w-[180px]";
+    }
+    if (typeof scheduleDraftSave === 'function') scheduleDraftSave();
 }
 
 async function saveAllRetailInvoices() {
@@ -5692,6 +5720,8 @@ function clearRetailInvoice() {
         retailStaging = [];
         editingRetailInvoiceIndex = null;
         editingRetailKind = 'retail';
+        posKind = null;
+        paintPosKind();
         setRetailEditBanner();
         discardCurrentDraft();
         retailSessionAddedAt = Date.now();
@@ -5730,6 +5760,26 @@ function updateRetailPriceDisplay() {
         retailItemAdjustmentConfirmed = false;         // لازم يحط النسبة/المبلغ تاني قبل الإضافة
     }
     updateRetailStockDisplay();   // الكمية المتاحة في المخزن (للشاشة بس)
+
+    // سعر المقاس حسب نوع الفاتورة (ولو السعر التجاري لسه مضافش نقولها)
+    const notice = document.getElementById('retail-price-notice');
+    if (notice) {
+        const kind = posCurrentKind();
+        if (!variant) { notice.classList.add('hidden'); notice.textContent = ''; }
+        else if (!kind) {
+            notice.className = 'text-sm font-semibold mt-3 rounded-xl px-3 py-2 bg-red-50 text-red-600 border border-red-100';
+            notice.textContent = 'اختاري نوع الفاتورة (قطاعي أو تجاري) الأول عشان السعر يظهر';
+        } else {
+            const p = posBasePriceOf(variant);
+            if (p === null) {
+                notice.className = 'text-sm font-semibold mt-3 rounded-xl px-3 py-2 bg-amber-50 text-amber-700 border border-amber-200';
+                notice.textContent = 'السعر التجاري للمقاس ده لسه مضافش — ضيفيه من تعديل المنتج';
+            } else {
+                notice.className = 'text-sm font-semibold mt-3 rounded-xl px-3 py-2 bg-slate-50 text-slate-600 border border-slate-100';
+                notice.textContent = `سعر ${kind === 'wholesale' ? 'التجاري' : 'القطاعي'}: ${p.toFixed(2)} جنيه`;
+            }
+        }
+    }
 }
 
 // تطبيق التعديل تلقائياً عند الكتابة، وتأكيد إن اليوزر حط القيمة فعلاً قبل الإضافة
@@ -5762,12 +5812,20 @@ function addToRetailInvoice() {
     const variant = product.variants.find(v => v.size === size);
     if (!variant) return alert(' المقاس غير موجود');
 
+    // السعر الأساسي حسب نوع الفاتورة (قطاعي أو تجاري)
+    if (!posCurrentKind()) return alert(' اختاري نوع الفاتورة الأول (قطاعي أو تجاري)');
+    let basePrice = posBasePriceOf(variant);
+    if (basePrice === null) {
+        if (!confirm(`السعر التجاري للمنتج ده (${product.name} — ${size}) لسه مضافش.\nتضيفيه بسعر القطاعي (${(Number(variant.price) || 0).toFixed(2)} جنيه)؟`)) return;
+        basePrice = Number(variant.price) || 0;
+    }
+
     // ==== لو المنتج ده اتباع قبل كده في نفس الفاتورة، بياخد نفس السعر اللي اتباع بيه هنا ====
     // (السعر ده خاص بالفاتورة دي بس — أي فاتورة تانية هترجع للسعر الأساسي عادي)
     // (بس لو السعر الأساسي لسه زي ما كان وقت الإضافة — لو اتغيّر في المنتج بياخد السعر الجديد)
     const sameItemInInvoice = retailInvoice.find(it =>
         it.productName === product.name && String(it.size) === String(size)
-        && it.basePrice !== undefined && Math.abs(Number(it.basePrice) - Number(variant.price)) < 0.005
+        && it.basePrice !== undefined && Math.abs(Number(it.basePrice) - basePrice) < 0.005
     );
     if (sameItemInInvoice) {
         const rememberedPrice = Number(sameItemInInvoice.price) || 0;
@@ -5776,7 +5834,7 @@ function addToRetailInvoice() {
             productName: product.name,
             ...(isPipeProduct(product) ? { isPipe: true, pipeLength: pipeLengthOf(product) } : {}),
             size: size,
-            basePrice: variant.price,
+            basePrice: basePrice,
             originalPrice: Number(variant.originalPrice) || 0,
             price: rememberedPrice,
             qty: qty,
@@ -5799,7 +5857,7 @@ function addToRetailInvoice() {
         if (sizeSelectSame) sizeSelectSame.innerHTML = '<option value="">اختر المقاس...</option>';
         updateRetailStockDisplay();
 
-        showToast(`اتضاف بسعر الفاتورة دي ${rememberedPrice.toFixed(2)} ج (السعر الأساسي ${Number(variant.price).toFixed(2)} ج)`, 'success');
+        showToast(`اتضاف بسعر الفاتورة دي ${rememberedPrice.toFixed(2)} ج (السعر الأساسي ${basePrice.toFixed(2)} ج)`, 'success');
         return;
     }
 
@@ -5813,7 +5871,7 @@ function addToRetailInvoice() {
             productName: product.name,
             ...(isPipeProduct(product) ? { isPipe: true, pipeLength: pipeLengthOf(product) } : {}),
             size: size,
-            basePrice: variant.price,
+            basePrice: basePrice,
             originalPrice: Number(variant.originalPrice) || 0,
             qty: qty
         });
@@ -5836,11 +5894,11 @@ function addToRetailInvoice() {
     // النسبة مش إجبارية: بنقرا اللي في الخانة دلوقتي (الافتراضي صفر) وبنضيف على طول
     applyRetailPriceAdjustment();
 
-    let finalPrice = variant.price;
+    let finalPrice = basePrice;
     if (retailAdjustmentType === 'percent') {
-        finalPrice = variant.price * (1 + retailPriceAdjustment / 100);
+        finalPrice = basePrice * (1 + retailPriceAdjustment / 100);
     } else {
-        finalPrice = variant.price + retailPriceAdjustment;
+        finalPrice = basePrice + retailPriceAdjustment;
     }
 
     finalPrice = Math.max(0, finalPrice);   // منع السعر السالب
@@ -5850,7 +5908,7 @@ function addToRetailInvoice() {
         productName: product.name,
         ...(isPipeProduct(product) ? { isPipe: true, pipeLength: pipeLengthOf(product) } : {}),
         size: size,
-        basePrice: variant.price,
+        basePrice: basePrice,
         originalPrice: Number(variant.originalPrice) || 0,
         price: finalPrice,
         qty: qty,
@@ -6174,7 +6232,7 @@ function returnsPrintHtml(inv) {
 function printSummaryCardHtml(opts) {
     const {
         gross = 0, returnsTotal = 0, net = 0, discount = 0,
-        previousDebt = 0, grandTotal = 0, paid = 0, remaining = 0, settled = false
+        previousDebt = 0, previousDebtDate = 0, grandTotal = 0, paid = 0, remaining = 0, settled = false
     } = opts || {};
 
     const rows = [];
@@ -6188,7 +6246,7 @@ function printSummaryCardHtml(opts) {
         rows.push({ label: 'الخصم', value: `− ${discount.toFixed(2)} جنيه`, minus: true });
     }
     if (previousDebt > 0) {
-        rows.push({ label: 'متبقي سابق على العميل', value: `${previousDebt.toFixed(2)} جنيه` });
+        rows.push({ label: previousDebtDate ? `متبقي سابق على العميل (من ${fmtDebtDate(previousDebtDate)})` : 'متبقي سابق على العميل', value: `${previousDebt.toFixed(2)} جنيه` });
         rows.push({ label: 'الإجمالي المطلوب', value: `${grandTotal.toFixed(2)} جنيه`, strong: true });
     }
     rows.push({ label: 'المبلغ المدفوع', value: `${paid.toFixed(2)} جنيه`, good: true });
@@ -6198,7 +6256,7 @@ function printSummaryCardHtml(opts) {
     const breakdownBox = previousDebt > 0 ? `
         <div style="margin:0 0 10px;padding:10px 14px;border:2px solid #F59E0B;background:#FFFBEB;border-radius:10px;
                     text-align:center;font-weight:700;color:#92400E;font-size:14px;line-height:1.9;">
-            عليه ${previousDebt.toFixed(2)} جنيه سابقًا
+            عليه ${previousDebt.toFixed(2)} جنيه سابقًا${previousDebtDate ? ` <span style="font-size:12px;font-weight:600;">(من ${fmtDebtDate(previousDebtDate)})</span>` : ''}
             &nbsp;+&nbsp; ${currentPart.toFixed(2)} جنيه الفاتورة الحالية
             &nbsp;=&nbsp; <span style="font-size:16px;color:#B45309;">${grandTotal.toFixed(2)} جنيه</span> الإجمالي النهائي
         </div>` : '';

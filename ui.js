@@ -439,7 +439,9 @@ window.applyProductsFilter = function () {
         filtered = filtered.filter(p => (p.name || '').toLowerCase().includes(query));
     }
     if (productStockFilter) {
-        filtered = filtered.filter(p => productStatus(p) === productStockFilter);
+        // المنتج بيظهر لو فيه مقاس واحد على الأقل بالحالة دي (مثلًا "متاح" = فيه مقاس لسه موجود
+        // حتى لو باقي المقاسات نفدت) — قبل كده كان بيعتمد على حالة المنتج كله فبيختفي.
+        filtered = filtered.filter(p => (p.variants || []).some(v => variantStatus(v) === productStockFilter));
     }
 
     renderProducts(filtered);
@@ -552,6 +554,15 @@ window.renderProducts = function (filtered) {
         const companies = (product.companies || []).map(c => getCompanyLabel(c)).filter(Boolean);
         const st = productStatus(product);
 
+        // لو فلتر الحالة شغال: نكتب المقاسات اللي بالحالة دي وكميتها تحت اسم المنتج
+        const sizesLine = productStockFilter ? (() => {
+            const m = product.variants.filter(v => variantStatus(v) === productStockFilter);
+            const lab = { ok: 'المقاسات المتاحة', low: 'المقاسات المنخفضة', out: 'المقاسات اللي نفدت' }[productStockFilter];
+            if (!m.length) return '';
+            return `<div class="text-xs mt-1 text-ink-600">${lab}: ${m.map(v => `${esc(v.size)}${productStockFilter === 'out' ? '' : ' (' + fmtNum(Number(v.stock) || 0) + ')'}`).join('، ')}</div>`;
+        })() : '';
+        const badgeStatus = productStockFilter || st;
+
         return `
         <tr class="row" onclick="openProductDrawer(${product.id})">
             <td class="cell-main">
@@ -560,6 +571,7 @@ window.renderProducts = function (filtered) {
                     <div class="min-w-0">
                         <div class="font-semibold text-ink-900 truncate">${esc(product.name)}</div>
                         <div class="text-xs text-ink-400 mt-0.5">${product.variants.length} مقاس</div>
+                        ${sizesLine}
                     </div>
                 </div>
             </td>
@@ -570,7 +582,7 @@ window.renderProducts = function (filtered) {
             <td class="cell text-center tabular font-semibold">${fmtNum(stock)}</td>
             <td class="cell text-center tabular hide-sm">${priceRange}</td>
             <td class="cell text-center tabular hide-sm">${wholesaleRange}</td>
-            <td class="cell text-center">${statusBadge(st)}</td>
+            <td class="cell text-center">${statusBadge(badgeStatus)}</td>
             <td class="cell text-left no-print" onclick="event.stopPropagation()">
                 <div class="relative inline-block">
                     <button type="button" class="icon-btn" title="إجراءات" onclick="toggleMenu('pmenu-${product.id}')">${icon('more', 'w-[18px] h-[18px]')}</button>
